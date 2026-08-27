@@ -1,6 +1,6 @@
 /**
  * BrowserCrawler - MorfEmail Playwright Chromium Runner
- * Renderiza páginas dinámicas, Single Page Applications (React/Vue/Angular) y contenido generado por JavaScript.
+ * Renderiza páginas dinámicas mediante el backend local Playwright.
  */
 
 import { MorfExtractor } from '../extraction/morfExtractor';
@@ -15,9 +15,6 @@ export class BrowserCrawler {
     this.timeoutMs = options?.timeoutMs || 15000;
   }
 
-  /**
-   * Renderiza la página ejecutando JavaScript en un navegador Chromium headless.
-   */
   public async renderAndExtract(
     url: string,
     options?: {
@@ -27,27 +24,29 @@ export class BrowserCrawler {
       defaultCountryCode?: string;
     }
   ): Promise<RawExtractedData> {
-    try {
-      // Simulación de navegación profunda Playwright Chromium
-      // En entorno de Node/Tauri Desktop se invoca via Playwright runner
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (Playwright Headless)'
-        }
-      });
-      const html = await res.text();
+    const response = await fetch('/api/render-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, timeoutMs: this.timeoutMs, headless: this.isHeadless })
+    });
 
-      return MorfExtractor.extractFromHtml(html, url, {
-        category: options?.category,
-        city: options?.city,
-        country: options?.country,
-        defaultCountryCode: options?.defaultCountryCode,
-        renderedWith: 'playwright',
-        httpStatus: res.status
-      });
-    } catch (err: any) {
-      throw new Error(`BrowserCrawler Playwright Error (${url}): ${err.message}`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Playwright local respondió HTTP ${response.status}`);
     }
+
+    const html = String(payload?.html || '');
+    const finalUrl = String(payload?.finalUrl || url);
+    const statusCode = Number(payload?.statusCode || 0);
+
+    return MorfExtractor.extractFromHtml(html, finalUrl, {
+      category: options?.category,
+      city: options?.city,
+      country: options?.country,
+      defaultCountryCode: options?.defaultCountryCode,
+      renderedWith: 'playwright',
+      httpStatus: statusCode
+    });
   }
 
   public setHeadless(headless: boolean): void {
