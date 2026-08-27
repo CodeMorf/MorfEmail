@@ -16,22 +16,35 @@ import {
   ChevronRight,
   Calendar
 } from 'lucide-react';
-import { ActiveView, SearchHistoryItem } from '../types';
+import { ActiveView, SearchHistoryItem, ScheduledSearch, LeadList } from '../types';
+import { ScheduledSearchesSection } from './ScheduledSearchesSection';
 
 interface DashboardViewProps {
   setActiveView: (view: ActiveView) => void;
   history: SearchHistoryItem[];
+  scheduledSearches: ScheduledSearch[];
+  lists: LeadList[];
   onRepeatSearch: (item: SearchHistoryItem) => void;
   onOpenResultsFor: (item: SearchHistoryItem) => void;
   openExportModal: () => void;
+  onSaveScheduledSearch: (data: any) => void;
+  onToggleScheduledStatus: (id: string) => void;
+  onDeleteScheduledSearch: (id: string) => void;
+  onRunScheduledSearchNow: (id: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   setActiveView,
   history,
+  scheduledSearches,
+  lists,
   onRepeatSearch,
   onOpenResultsFor,
-  openExportModal
+  openExportModal,
+  onSaveScheduledSearch,
+  onToggleScheduledStatus,
+  onDeleteScheduledSearch,
+  onRunScheduledSearchNow
 }) => {
   const chartDays = [
     { day: 'Jue 20', count: 1820, height: '48%', label: '1,820' },
@@ -62,7 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setActiveView('morf-ai')}
-            className="flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-all border border-slate-300"
+            className="flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-all border border-slate-300 cursor-pointer"
           >
             <Bot className="w-4 h-4 text-[#F04438]" />
             <span>Asistente Morf AI</span>
@@ -149,6 +162,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* SCHEDULED SEARCHES & AUTO-REFRESH SECTION */}
+      <ScheduledSearchesSection
+        scheduledSearches={scheduledSearches}
+        lists={lists}
+        onSaveScheduledSearch={onSaveScheduledSearch}
+        onToggleScheduledStatus={onToggleScheduledStatus}
+        onDeleteScheduledSearch={onDeleteScheduledSearch}
+        onRunScheduledSearchNow={onRunScheduledSearchNow}
+        onOpenList={(listId) => setActiveView('lists')}
+      />
+
       {/* Grid: 7-Day Chart & Morf AI Insight */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Visual Chart: Leads últimos 7 días */}
@@ -229,7 +253,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="pt-4 space-y-2">
             <button
               onClick={() => setActiveView('morf-ai')}
-              className="w-full flex items-center justify-center space-x-1.5 py-2 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
+              className="w-full flex items-center justify-center space-x-1.5 py-2 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg text-xs font-semibold transition-all shadow-sm cursor-pointer"
             >
               <span>Abrir Morf AI Studio</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -257,7 +281,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <button
             onClick={() => setActiveView('history')}
-            className="text-xs font-semibold text-[#F04438] hover:underline flex items-center space-x-1"
+            className="text-xs font-semibold text-[#F04438] hover:underline flex items-center space-x-1 cursor-pointer"
           >
             <span>Ver todo el historial</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -313,21 +337,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <td className="py-3 px-4 text-right space-x-1 whitespace-nowrap">
                     <button
                       onClick={() => onOpenResultsFor(row)}
-                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded transition-colors"
+                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded transition-colors cursor-pointer"
                       title="Ver resultados"
                     >
                       <Eye className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => onRepeatSearch(row)}
-                      className="p-1.5 text-slate-600 hover:text-[#F04438] hover:bg-slate-200 rounded transition-colors"
+                      className="p-1.5 text-slate-600 hover:text-[#F04438] hover:bg-slate-200 rounded transition-colors cursor-pointer"
                       title="Repetir búsqueda"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={openExportModal}
-                      className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-200 rounded transition-colors"
+                      className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-200 rounded transition-colors cursor-pointer"
                       title="Exportar leads"
                     >
                       <Download className="w-3.5 h-3.5" />

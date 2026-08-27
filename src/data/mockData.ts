@@ -1,4 +1,14 @@
-import { Lead, SearchHistoryItem, LeadList, SearchConfig, EmailVerificationItem } from '../types';
+import {
+  Lead,
+  SearchHistoryItem,
+  LeadList,
+  SearchConfig,
+  EmailVerificationItem,
+  ScheduledSearch,
+  AiConfig,
+  ProxyConfig,
+  PolarLicense
+} from '../types';
 import { ALL_COUNTRIES, POPULAR_COUNTRIES } from './countries';
 
 export const INITIAL_COUNTRIES = POPULAR_COUNTRIES.map((c) => ({
@@ -511,3 +521,134 @@ export const MOCK_ACTIVITY_LOGS = [
   { text: '✓ mariscadasanto.do — email info@ + teléfono + dirección postal', time: '6s' },
   { text: '✓ bistrobella.do — email + Instagram @bistrobella', time: '7s' }
 ];
+
+export const INITIAL_SCHEDULED_SEARCHES: ScheduledSearch[] = [
+  {
+    id: 'sched-1',
+    title: 'Restaurantes & Gastronomía en Santo Domingo',
+    category: 'Restaurantes',
+    country: 'República Dominicana',
+    countryCode: 'DO',
+    flag: '🇩🇴',
+    state: 'Santo Domingo',
+    city: 'Distrito Nacional',
+    interval: 'daily',
+    targetListId: 'list-1',
+    targetListName: '🇩🇴 Restaurantes RD',
+    status: 'active',
+    lastRun: 'Hoy a las 06:00 AM',
+    nextRun: 'Mañana a las 06:00 AM',
+    leadsHarvestedTotal: 4820,
+    newLeadsLastRun: 340,
+    autoVerifyEmails: true,
+    autoDeduplicate: true,
+    notifyEmail: true,
+    quantityPerRun: 500,
+    createdAt: '2026-08-10'
+  },
+  {
+    id: 'sched-2',
+    title: 'Inmobiliarias & Brokers Miami',
+    category: 'Inmobiliarias',
+    country: 'Estados Unidos',
+    countryCode: 'US',
+    flag: '🇺🇸',
+    state: 'Florida',
+    city: 'Miami',
+    interval: 'weekly',
+    targetListId: 'list-4',
+    targetListName: '🇺🇸 Miami Businesses',
+    status: 'active',
+    lastRun: 'Hace 2 días',
+    nextRun: 'Lunes a las 08:00 AM',
+    leadsHarvestedTotal: 2950,
+    newLeadsLastRun: 420,
+    autoVerifyEmails: true,
+    autoDeduplicate: true,
+    notifyEmail: false,
+    quantityPerRun: 1000,
+    createdAt: '2026-08-14'
+  },
+  {
+    id: 'sched-3',
+    title: 'Despachos Jurídicos & Asesorías',
+    category: 'Abogados',
+    country: 'España',
+    countryCode: 'ES',
+    flag: '🇪🇸',
+    state: 'Madrid',
+    city: 'Madrid Centro',
+    interval: 'weekly',
+    targetListId: 'list-5',
+    targetListName: '🇪🇸 España Leads',
+    status: 'paused',
+    lastRun: '20 Ago 2026',
+    nextRun: 'Pausado',
+    leadsHarvestedTotal: 1028,
+    newLeadsLastRun: 180,
+    autoVerifyEmails: true,
+    autoDeduplicate: true,
+    notifyEmail: true,
+    quantityPerRun: 500,
+    createdAt: '2026-08-18'
+  }
+];
+
+export const INITIAL_AI_CONFIG: AiConfig = {
+  activeProvider: 'codemorf',
+  openai: {
+    apiKey: 'sk-proj-••••••••••••••••••••••••••••••••92KA',
+    model: 'gpt-4o',
+    organization: ''
+  },
+  gemini: {
+    apiKey: 'AIzaSy••••••••••••••••••••••••••••••••88zQ',
+    model: 'gemini-2.5-flash'
+  },
+  codemorf: {
+    apiKey: 'cm_ai_live_8941_9920_auth',
+    model: 'morf-b2b-v2-turbo',
+    creditsRemaining: 45000
+  },
+  custom: {
+    providerName: 'DeepSeek API',
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: 'sk-••••••••••••••••••••••••••••••••55X1',
+    model: 'deepseek-chat'
+  }
+};
+
+export const INITIAL_PROXY_CONFIG: ProxyConfig = {
+  enabled: false,
+  protocol: 'http',
+  host: 'proxy.residential-gate.io',
+  port: 8080,
+  username: 'cml_user_891',
+  password: '••••••••••••',
+  bypassLocal: true,
+  rotatePerRequest: true,
+  routeAiRequests: true,
+  routeScraping: true,
+  routeEmailVerifier: true,
+  status: 'idle',
+  lastTestedIp: '185.220.101.42',
+  latencyMs: 68
+};
+
+export const INITIAL_POLAR_LICENSE: PolarLicense = {
+  licenseKey: 'polar_lk_live_8924_7719_82k1_annual',
+  status: 'active',
+  billingPeriod: 'annual',
+  planName: 'CodeMorf Leads PRO Annual',
+  polarCustomerId: 'cst_polar_901842',
+  polarSubscriptionId: 'sub_polar_annual_44912',
+  activationSeatsTotal: 2,
+  activationSeatsUsed: 1,
+  hardwareId: 'DESKTOP-JHON (Win 11 x64)',
+  validUntil: '26 de septiembre de 2026',
+  portalUrl: 'https://polar.sh/purchases',
+  polarDocsUrl: 'https://polar.sh/docs/introduction',
+  polarCheckoutAnnualUrl: 'https://polar.sh/codemorf/products/leads-pro-annual',
+  lastVerifiedAt: '2026-08-26 14:30 UTC'
+};
+

@@ -12,30 +12,62 @@ import {
   Zap,
   HelpCircle,
   Lightbulb,
-  ArrowRight
+  ArrowRight,
+  Settings as SettingsIcon,
+  Shield,
+  Network,
+  Cpu
 } from 'lucide-react';
-import { ActiveView, SearchConfig } from '../types';
+import { ActiveView, AiConfig, ProxyConfig, SearchConfig } from '../types';
+import { INITIAL_AI_CONFIG, INITIAL_PROXY_CONFIG } from '../data/mockData';
 
 interface MorfAiViewProps {
+  activeAiConfig?: AiConfig;
+  activeProxyConfig?: ProxyConfig;
   setActiveView: (view: ActiveView) => void;
   setConfig: React.Dispatch<React.SetStateAction<SearchConfig>>;
   addToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
 export const MorfAiView: React.FC<MorfAiViewProps> = ({
+  activeAiConfig = INITIAL_AI_CONFIG,
+  activeProxyConfig = INITIAL_PROXY_CONFIG,
   setActiveView,
   setConfig,
   addToast
 }) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'queries' | 'outreach'>('chat');
   const [inputPrompt, setInputPrompt] = useState('');
-  const [messages, setMessages] = useState<{ sender: 'user' | 'morf'; text: string; action?: { label: string; config?: Partial<SearchConfig> } }[]>([
+  const [messages, setMessages] = useState<{
+    sender: 'user' | 'morf';
+    text: string;
+    modelUsed?: string;
+    action?: { label: string; config?: Partial<SearchConfig> };
+  }>([
     {
       sender: 'morf',
-      text: '¡Hola! Soy **Morf AI**, tu copiloto inteligente de prospección y generación de leads en CodeMorf Leads.\n\nPuedo ayudarte a encontrar los nichos de mayor conversión, generar consultas optimizadas, redactar secuencias de cold email o preparar guiones de WhatsApp para tus prospectos extraídos.',
+      text: '¡Hola! Soy **Morf AI Studio**, tu copiloto inteligente de prospección B2B y enriquecimiento de leads.\n\nPuedo ayudarte a encontrar los nichos de mayor conversión, generar consultas optimizadas por ciudad o país, redactar secuencias de cold email de alta apertura y preparar guiones de WhatsApp comercial para tus prospectos extraídos.',
+      modelUsed: getActiveModelName(activeAiConfig)
     }
   ]);
   const [isThinking, setIsThinking] = useState(false);
+
+  function getActiveModelName(cfg: AiConfig): string {
+    switch (cfg.activeProvider) {
+      case 'openai':
+        return `OpenAI ${cfg.openai.model}`;
+      case 'gemini':
+        return `Google Gemini ${cfg.gemini.model}`;
+      case 'codemorf':
+        return `CodeMorf Native (${cfg.codemorf.model})`;
+      case 'custom':
+        return `${cfg.custom.providerName || 'Custom'} (${cfg.custom.model})`;
+      default:
+        return 'Morf B2B AI';
+    }
+  }
+
+  const currentModelLabel = getActiveModelName(activeAiConfig);
 
   const handleSendMessage = (textToSend?: string) => {
     const text = textToSend || inputPrompt;
@@ -82,7 +114,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
       } else if (lower.includes('email') || lower.includes('plantilla') || lower.includes('outreach')) {
         botResponse = `📨 **Plantilla de Cold Email de Alta Conversión (B2B):**\n\n**Asunto:** Pregunta rápida sobre adquisición de clientes en {{Ciudad}}\n\nHola {{Nombre_Empresa}},\n\nEstuve revisando su sitio web y noté el gran trabajo que vienen realizando en el sector de {{Categoría}} en {{Ciudad}}.\n\nDesarrollamos soluciones especializadas para empresas de su sector que permiten aumentar el flujo de prospectos cualificados en un 35% durante los primeros 45 días.\n\n¿Tendrían disponibilidad este miércoles para una llamada ejecutiva de 5 minutos?\n\nUn cordial saludo,\nJhon D. — CodeMorf Leads`;
       } else {
-        botResponse = `💡 **Análisis de Morf AI:** He analizado tu solicitud para "${text}".\n\nTe recomiendo enfocar tu búsqueda en empresas con al menos sitio web activo y verificar siempre los registros MX antes de lanzar campañas masivas para proteger la reputación de tu dominio de envío.`;
+        botResponse = `💡 **Análisis de ${currentModelLabel}:** He analizado tu solicitud para "${text}".\n\nTe recomiendo enfocar tu búsqueda en empresas con al menos sitio web activo y verificar siempre los registros MX antes de lanzar campañas masivas para proteger la reputación de tu dominio de envío.`;
       }
 
       setMessages((prev) => [
@@ -90,6 +122,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
         {
           sender: 'morf',
           text: botResponse,
+          modelUsed: currentModelLabel,
           action: botAction
         }
       ]);
@@ -112,8 +145,8 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6 overflow-y-auto pb-16">
-      {/* Top Banner with Doc Link */}
-      <div className="bg-gradient-to-r from-[#121417] via-[#1A1D21] to-[#121417] text-white p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Banner with Provider Status and Doc Link */}
+      <div className="bg-gradient-to-r from-[#121417] via-[#1A1D21] to-[#121417] text-white p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center space-x-3.5">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#F04438] to-[#991B1B] flex items-center justify-center shadow-lg shadow-[#F04438]/20 flex-shrink-0">
             <Bot className="w-6 h-6 text-white" />
@@ -126,27 +159,60 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Inteligencia artificial especializada en prospección, análisis de mercados y redacción de campañas.
+              Inteligencia artificial multimodelo para prospección, análisis de mercados y redacción de campañas.
             </p>
           </div>
         </div>
 
-        <a
-          href="https://codemorf.tech/chat/docs/es/"
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center space-x-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-semibold border border-slate-700 transition-all self-start md:self-auto shadow-sm"
-        >
-          <span>Documentación Oficial Morf AI</span>
-          <ExternalLink className="w-3.5 h-3.5 text-[#F04438]" />
-        </a>
+        {/* AI & Proxy status pill bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Active Model Pill */}
+          <div className="flex items-center space-x-2 px-3 py-1.5 bg-slate-800/90 rounded-xl border border-slate-700 text-xs">
+            <Cpu className="w-3.5 h-3.5 text-[#F04438]" />
+            <span className="font-mono text-slate-300">
+              Motor: <strong className="text-white">{currentModelLabel}</strong>
+            </span>
+          </div>
+
+          {/* Proxy Pill */}
+          <div className="flex items-center space-x-2 px-3 py-1.5 bg-slate-800/90 rounded-xl border border-slate-700 text-xs">
+            <Network className="w-3.5 h-3.5 text-blue-400" />
+            <span className="font-mono text-slate-300">
+              Proxy:{' '}
+              <strong className={activeProxyConfig.enabled ? 'text-emerald-400' : 'text-slate-400'}>
+                {activeProxyConfig.enabled
+                  ? `${activeProxyConfig.protocol.toUpperCase()} (${activeProxyConfig.lastTestedIp || activeProxyConfig.host})`
+                  : 'Desactivado'}
+              </strong>
+            </span>
+          </div>
+
+          <button
+            onClick={() => setActiveView('settings')}
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+            title="Cambiar proveedor de IA o configurar proxy"
+          >
+            <SettingsIcon className="w-3.5 h-3.5 text-slate-300" />
+            <span>Configurar</span>
+          </button>
+
+          <a
+            href="https://codemorf.tech/chat/docs/es/"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+          >
+            <span>Docs Morf AI</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-slate-200 pb-2">
         <button
           onClick={() => setActiveTab('chat')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
             activeTab === 'chat' ? 'bg-[#F04438] text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
@@ -156,7 +222,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 
         <button
           onClick={() => setActiveTab('queries')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
             activeTab === 'queries' ? 'bg-[#F04438] text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
@@ -166,7 +232,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 
         <button
           onClick={() => setActiveTab('outreach')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
             activeTab === 'outreach' ? 'bg-[#F04438] text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
@@ -200,6 +266,12 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
                 >
                   <div>{m.text}</div>
 
+                  {m.modelUsed && m.sender === 'morf' && (
+                    <div className="mt-2.5 text-[10px] text-slate-400 font-mono flex items-center space-x-1">
+                      <span>⚡ Generado con {m.modelUsed}</span>
+                    </div>
+                  )}
+
                   {m.action && (
                     <div className="mt-3 pt-3 border-t border-slate-200">
                       <button
@@ -218,7 +290,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
             {isThinking && (
               <div className="flex items-center space-x-2 text-slate-400 text-xs italic">
                 <Bot className="w-4 h-4 animate-bounce text-[#F04438]" />
-                <span>Morf AI está analizando datos de mercado...</span>
+                <span>Morf AI ({currentModelLabel}) está procesando solicitud...</span>
               </div>
             )}
           </div>
@@ -227,20 +299,20 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
           <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 flex flex-wrap gap-1.5 text-[11px]">
             <span className="text-slate-400 font-semibold uppercase text-[10px] self-center mr-1">Preguntas rápidas:</span>
             <button
-              onClick={() => handleSendMessage('¿Cómo prospectar restaurantes en RD?')}
-              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors"
+              onClick={() => handleSendMessage('¿Cómo prospectar restaurantes en República Dominicana?')}
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
               🇩🇴 Restaurantes en RD
             </button>
             <button
               onClick={() => handleSendMessage('Genera un email en frío para abogados en Madrid')}
-              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors"
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
               🇪🇸 Abogados en Madrid
             </button>
             <button
               onClick={() => handleSendMessage('Crea una plantilla de WhatsApp comercial')}
-              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors"
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
               💬 WhatsApp B2B
             </button>
@@ -250,7 +322,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
           <div className="p-3 border-t border-slate-200 flex items-center space-x-2 bg-white">
             <input
               type="text"
-              placeholder="Pregunta a Morf AI sobre mercados, sugerencias de búsqueda o cold emails..."
+              placeholder={`Pregunta a Morf AI (${currentModelLabel}) sobre mercados, sugerencias o emails...`}
               value={inputPrompt}
               onChange={(e) => setInputPrompt(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -348,7 +420,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 
               <button
                 onClick={() => applyConfigAndGo(item.config)}
-                className="w-full py-2 bg-slate-900 hover:bg-[#F04438] text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
+                className="w-full py-2 bg-slate-900 hover:bg-[#F04438] text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
               >
                 <span>Cargar en Nueva Búsqueda</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -378,7 +450,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
                 <h3 className="font-bold text-slate-900 text-xs">{tpl.title}</h3>
                 <button
                   onClick={() => copyText(tpl.content)}
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold flex items-center space-x-1"
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold flex items-center space-x-1 cursor-pointer"
                 >
                   <Copy className="w-3 h-3" />
                   <span>Copiar</span>
@@ -394,3 +466,4 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
     </div>
   );
 };
+

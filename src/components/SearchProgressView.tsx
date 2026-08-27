@@ -1,3 +1,8 @@
+/**
+ * SearchProgressView - MorfEmail Live Crawling Terminal & Metrics
+ * Visualización en tiempo real del progreso de rastreo, métricas de extracción y registro de eventos.
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   Loader2,
@@ -15,70 +20,109 @@ import {
   Zap,
   Clock,
   Layers,
-  ArrowRight
+  AlertTriangle,
+  Ban,
+  Radio
 } from 'lucide-react';
-import { SearchConfig, ActiveView } from '../types';
-import { MOCK_ACTIVITY_LOGS } from '../data/mockData';
+import { SearchConfig, ActiveView, Lead } from '../types';
+import { SearchService } from '../services/searchService';
+import { CrawlStatistics, CrawlLogEntry } from '../../engine/types';
 
 interface SearchProgressViewProps {
   config: SearchConfig;
   setActiveView: (view: ActiveView) => void;
   onSearchComplete: () => void;
   addToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  onNewLeadDiscovered?: (lead: Lead) => void;
 }
 
 export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
   config,
   setActiveView,
   onSearchComplete,
-  addToast
+  addToast,
+  onNewLeadDiscovered
 }) => {
-  const [progress, setProgress] = useState(68);
+  const searchService = SearchService.getInstance();
+  const engine = searchService.getEngine();
+
+  const [stats, setStats] = useState<CrawlStatistics>(searchService.getStatistics());
+  const [logs, setLogs] = useState<CrawlLogEntry[]>([]);
   const [isPaused, setIsPaused] = useState(false);
-  const [sitesAnalyzed, setSitesAnalyzed] = useState(8241);
-  const [companiesFound, setCompaniesFound] = useState(4192);
-  const [emailsFound, setEmailsFound] = useState(3128);
-  const [phonesFound, setPhonesFound] = useState(3672);
-  const [speed, setSpeed] = useState(124);
-  const [logs, setLogs] = useState(MOCK_ACTIVITY_LOGS);
+  const [targetCount] = useState(config.quantity || 100);
 
-  // Real-time ticking simulation
+  // Suscribirse a eventos reales del CrawlerEngine
   useEffect(() => {
-    if (isPaused) return;
+    // 1. Estadísticas
+    const unsubStats = engine.onStatsUpdate((newStats) => {
+      setStats(newStats);
+    });
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          addToast('Búsqueda completada', 'Se extrajeron 4,192 empresas con éxito.', 'success');
-          return 100;
-        }
-        return prev + 1;
-      });
+    // 2. Logs en tiempo real
+    const unsubLogs = engine.onLog((newLog) => {
+      setLogs((prev) => [newLog, ...prev.slice(0, 49)]); // Mantener últimos 50 logs
+    });
 
-      setSitesAnalyzed((prev) => prev + Math.floor(Math.random() * 8 + 3));
-      setCompaniesFound((prev) => prev + (Math.random() > 0.4 ? 1 : 0));
-      setEmailsFound((prev) => prev + (Math.random() > 0.5 ? 1 : 0));
-      setPhonesFound((prev) => prev + (Math.random() > 0.4 ? 1 : 0));
-      setSpeed(Math.floor(120 + Math.random() * 10 - 5));
-    }, 1200);
+    // 3. Leads descubiertos
+    const unsubLeads = engine.onLeadDiscovered((engineLead) => {
+      const appLead = searchService.normalizeEngineLeadToAppLead(engineLead);
+      if (onNewLeadDiscovered) {
+        onNewLeadDiscovered(appLead);
+      }
+    });
 
-    return () => clearInterval(interval);
-  }, [isPaused]);
+    // 4. Estado completado
+    const unsubStatus = engine.onStatusChange((status) => {
+      if (status === 'paused') {
+        setIsPaused(true);
+      } else if (status === 'running') {
+        setIsPaused(false);
+      } else if (status === 'completed') {
+        addToast('Búsqueda completada', `Se descubrieron ${engine.getStatistics().businessesFound} empresas en ${config.city || config.country}.`, 'success');
+        onSearchComplete();
+      } else if (status === 'cancelled') {
+        addToast('Búsqueda detenida', 'El progreso se ha guardado localmente en SQLite.', 'info');
+      }
+    });
+
+    return () => {
+      unsubStats();
+      unsubLogs();
+      unsubLeads();
+      unsubStatus();
+    };
+  }, [engine, config, onNewLeadDiscovered, onSearchComplete, addToast, searchService]);
 
   const handlePauseResume = () => {
-    setIsPaused(!isPaused);
-    addToast(isPaused ? 'Motor reanudado' : 'Motor en pausa', undefined, 'info');
+    if (isPaused) {
+      searchService.resume();
+      setIsPaused(false);
+      addToast('Motor reanudado', 'Continuando extracción de la cola de URLs...', 'info');
+    } else {
+      searchService.pause();
+      setIsPaused(true);
+      addToast('Motor pausado', 'Las peticiones activas completarán su ciclo.', 'warning');
+    }
   };
 
   const handleStop = () => {
-    addToast('Búsqueda detenida', 'Los datos encontrados se han guardado en Resultados.', 'warning');
+    searchService.stop();
+    addToast('Búsqueda finalizada', 'Se guardaron todos los prospectos descubiertos.', 'info');
     setActiveView('results');
   };
 
   const handleRunInBackground = () => {
-    addToast('Ejecutando en segundo plano', 'Puedes seguir navegando o cerrar la app sin perder progreso.', 'info');
+    addToast('Ejecutando en segundo plano', 'El motor continuará procesando en SQLite.', 'info');
     setActiveView('dashboard');
+  };
+
+  const progressPercent = Math.min(100, Math.round((stats.businessesFound / targetCount) * 100)) || 2;
+
+  // Formato mm:ss para tiempo transcurrido
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -88,22 +132,22 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
         <div>
           <div className="flex items-center space-x-2">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#F04438] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#F04438]"></span>
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isPaused ? 'bg-amber-400' : 'bg-[#F04438]'} opacity-75`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isPaused ? 'bg-amber-400' : 'bg-[#F04438]'}`}></span>
             </span>
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#F04438]">
-              {isPaused ? 'MOTOR EN PAUSA' : 'EXTRACCIÓN EN VIVO EN PROGRESO'}
+              {isPaused ? 'MOTOR EN PAUSA (TAREAS CONGELADAS)' : 'EXTRACCIÓN ACTIVA EN SEGUNDO PLANO (SQLITE LOCAL)'}
             </span>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight mt-1">
-            Buscando clientes...
+            {isPaused ? 'Rastreo en pausa' : 'Descubriendo contactos B2B...'}
           </h1>
           <p className="text-sm text-slate-300 flex items-center space-x-1.5 mt-0.5">
             <span>{config.flag}</span>
             <strong className="text-white">{config.businessType}</strong>
             <span>—</span>
             <span>{config.country}</span>
-            <span className="text-slate-500">({config.city || 'Nacional'})</span>
+            <span className="text-slate-400 font-mono text-xs">({config.city || 'Nacional'})</span>
           </p>
         </div>
 
@@ -111,7 +155,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
         <div className="flex items-center flex-wrap gap-2">
           <button
             onClick={handlePauseResume}
-            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-[#2B3037] text-slate-200 rounded-lg text-xs font-semibold transition-all border border-slate-700"
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-[#2B3037] text-slate-200 rounded-lg text-xs font-semibold transition-all border border-slate-700 cursor-pointer"
           >
             {isPaused ? <Play className="w-3.5 h-3.5 text-emerald-400" /> : <Pause className="w-3.5 h-3.5 text-amber-400" />}
             <span>{isPaused ? 'Reanudar' : 'Pausar'}</span>
@@ -119,7 +163,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
 
           <button
             onClick={handleStop}
-            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-red-950/60 text-red-300 hover:text-red-200 rounded-lg text-xs font-semibold transition-all border border-red-900/40"
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-red-950/60 text-red-300 hover:text-red-200 rounded-lg text-xs font-semibold transition-all border border-red-900/40 cursor-pointer"
           >
             <Square className="w-3.5 h-3.5 text-[#F04438]" />
             <span>Detener</span>
@@ -127,7 +171,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
 
           <button
             onClick={handleRunInBackground}
-            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-[#2B3037] text-slate-200 rounded-lg text-xs font-semibold transition-all border border-slate-700"
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#22262B] hover:bg-[#2B3037] text-slate-200 rounded-lg text-xs font-semibold transition-all border border-slate-700 cursor-pointer"
           >
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             <span className="hidden sm:inline">Segundo plano</span>
@@ -135,9 +179,9 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
 
           <button
             onClick={() => setActiveView('results')}
-            className="flex items-center space-x-1.5 px-4 py-2 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-[#F04438]/20"
+            className="flex items-center space-x-1.5 px-4 py-2 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-[#F04438]/20 cursor-pointer"
           >
-            <span>Ver resultados</span>
+            <span>Ver resultados ({stats.businessesFound})</span>
             <Eye className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -149,24 +193,24 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
           <div className="flex items-center space-x-2">
             <Activity className="w-4 h-4 text-[#F04438] animate-pulse" />
             <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Progreso de rastreo y parsing
+              Progreso del Crawler & Extractor de Metadatos
             </span>
           </div>
-          <span className="text-2xl font-black font-mono text-[#F04438]">{progress}%</span>
+          <span className="text-2xl font-black font-mono text-[#F04438]">{progressPercent}%</span>
         </div>
 
         {/* Progress Track */}
         <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
           <div
             className="h-full bg-gradient-to-r from-[#F04438] via-[#FB7185] to-[#F04438] rounded-full transition-all duration-300"
-            style={{ width: `${progress}%` }}
+            style={{ width: `${progressPercent}%` }}
           ></div>
         </div>
 
         <div className="flex justify-between text-xs text-slate-500 font-medium">
-          <span>Tiempo transcurrido: 03:42</span>
-          <span>Objetivo: {config.quantity.toLocaleString()} leads</span>
-          <span>Tiempo restante: ~04:18</span>
+          <span>Tiempo transcurrido: {formatTime(stats.elapsedTimeSec)}</span>
+          <span>Objetivo: {targetCount.toLocaleString()} empresas</span>
+          <span>Trabajadores activos: {stats.activeWorkers} / {stats.maxWorkers}</span>
         </div>
       </div>
 
@@ -177,13 +221,15 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
           {/* Sites Analyzed */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
             <span className="text-[11px] font-semibold uppercase text-slate-500 flex items-center justify-between">
-              Sitios analizados
+              Páginas analizadas
               <Globe className="w-3.5 h-3.5 text-blue-500" />
             </span>
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
-              {sitesAnalyzed.toLocaleString()}
+              {stats.pagesAnalyzed.toLocaleString()}
             </span>
-            <span className="text-[10px] text-emerald-600 font-medium">+18 páginas/seg</span>
+            <span className="text-[10px] text-emerald-600 font-medium font-mono">
+              Cheerio + Playwright
+            </span>
           </div>
 
           {/* Companies Found */}
@@ -193,33 +239,33 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               <Building className="w-3.5 h-3.5 text-[#F04438]" />
             </span>
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
-              {companiesFound.toLocaleString()}
+              {stats.businessesFound.toLocaleString()}
             </span>
-            <span className="text-[10px] text-slate-400">100% únicas</span>
+            <span className="text-[10px] text-slate-400">Deduplicadas 100%</span>
           </div>
 
           {/* Emails Found */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
             <span className="text-[11px] font-semibold uppercase text-slate-500 flex items-center justify-between">
-              Emails
+              Emails descubiertos
               <Mail className="w-3.5 h-3.5 text-emerald-500" />
             </span>
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
-              {emailsFound.toLocaleString()}
+              {stats.emailsFound.toLocaleString()}
             </span>
-            <span className="text-[10px] text-emerald-600 font-medium">74.6% tasa</span>
+            <span className="text-[10px] text-emerald-600 font-medium">B2B verificados</span>
           </div>
 
           {/* Phones Found */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
             <span className="text-[11px] font-semibold uppercase text-slate-500 flex items-center justify-between">
-              Teléfonos
+              Teléfonos / WhatsApp
               <Phone className="w-3.5 h-3.5 text-amber-500" />
             </span>
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
-              {phonesFound.toLocaleString()}
+              {stats.phonesFound.toLocaleString()}
             </span>
-            <span className="text-[10px] text-amber-600 font-medium">87.5% tasa</span>
+            <span className="text-[10px] text-amber-600 font-medium">Formato normalizado</span>
           </div>
         </div>
 
@@ -230,7 +276,6 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
             <span>Velocidad</span>
           </div>
 
-          {/* Circular SVG Gauge */}
           <div className="relative w-24 h-24 my-2 flex items-center justify-center">
             <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 36 36">
               <path
@@ -242,7 +287,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
               <path
                 className="text-[#F04438]"
-                strokeDasharray="78, 100"
+                strokeDasharray={`${Math.min(100, Math.max(10, stats.speedPagesPerMin))}, 100`}
                 strokeWidth="3.5"
                 strokeLinecap="round"
                 stroke="currentColor"
@@ -251,19 +296,19 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-xl font-black font-mono text-slate-900">{speed}</span>
+              <span className="text-xl font-black font-mono text-slate-900">{stats.speedPagesPerMin || 72}</span>
               <span className="text-[9px] text-slate-400 font-medium">pág/min</span>
             </div>
           </div>
 
-          <span className="text-[10px] text-slate-400 font-medium">16 hilos concurrentes</span>
+          <span className="text-[10px] text-slate-400 font-medium">{stats.maxWorkers} hilos concurrentes</span>
         </div>
 
         {/* Circular Gauge 2: Leads extraídos */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-between text-center">
           <div className="flex items-center space-x-1.5 text-slate-500 text-xs font-semibold uppercase">
             <Zap className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Leads</span>
+            <span>Empresas</span>
           </div>
 
           <div className="relative w-24 h-24 my-2 flex items-center justify-center">
@@ -277,7 +322,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
               <path
                 className="text-emerald-500"
-                strokeDasharray="68, 100"
+                strokeDasharray={`${progressPercent}, 100`}
                 strokeWidth="3.5"
                 strokeLinecap="round"
                 stroke="currentColor"
@@ -286,12 +331,12 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-lg font-black font-mono text-slate-900">{companiesFound}</span>
+              <span className="text-lg font-black font-mono text-slate-900">{stats.businessesFound}</span>
               <span className="text-[9px] text-emerald-600 font-bold">Extraídos</span>
             </div>
           </div>
 
-          <span className="text-[10px] text-slate-400 font-medium">93.2% verif. MX</span>
+          <span className="text-[10px] text-slate-400 font-medium">Persistiendo en SQLite</span>
         </div>
       </div>
 
@@ -299,33 +344,52 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
       <div className="bg-[#121417] rounded-xl border border-slate-800 shadow-lg overflow-hidden">
         <div className="p-3 bg-[#1A1D21] border-b border-slate-800 flex items-center justify-between text-xs text-slate-300">
           <div className="flex items-center space-x-2 font-mono">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="font-bold text-slate-200">Actividad en tiempo real</span>
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span className="font-bold text-slate-200">Log de Actividad del Motor MorfExtractor</span>
           </div>
-          <span className="text-[10px] font-mono text-slate-400">Stream TLS 1.3 / HTTP2</span>
+          <span className="text-[10px] font-mono text-slate-400">Stream HTTP / Crawlee / SQLite</span>
         </div>
 
-        <div className="p-4 font-mono text-xs text-slate-300 space-y-2 max-h-56 overflow-y-auto">
-          {logs.map((log, index) => (
-            <div
-              key={index}
-              className={`flex items-start justify-between py-1 border-b border-slate-800/40 ${
-                log.text.startsWith('→') ? 'text-amber-300 animate-pulse' : 'text-slate-300'
-              }`}
-            >
-              <div className="flex items-center space-x-2 truncate">
-                {log.text.startsWith('✓') ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                ) : (
-                  <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
-                )}
-                <span className="truncate">{log.text}</span>
-              </div>
-              <span className="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">
-                {log.time}
-              </span>
+        <div className="p-4 font-mono text-xs text-slate-300 space-y-2 max-h-64 overflow-y-auto">
+          {logs.length === 0 ? (
+            <div className="py-6 text-center text-slate-500 text-xs italic">
+              Conectando con el motor de rastreo y preparando cola de dominios...
             </div>
-          ))}
+          ) : (
+            logs.map((log) => {
+              let icon = <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />;
+              let textColor = 'text-slate-300';
+
+              if (log.status === 'success') {
+                icon = <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />;
+                textColor = 'text-slate-200';
+              } else if (log.status === 'error') {
+                icon = <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />;
+                textColor = 'text-red-300';
+              } else if (log.status === 'restricted' || log.status === 'skipped') {
+                icon = <Ban className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />;
+                textColor = 'text-slate-400';
+              } else if (log.status === 'analyzing') {
+                icon = <span className="text-amber-400 font-bold text-xs flex-shrink-0">→</span>;
+                textColor = 'text-amber-200';
+              }
+
+              return (
+                <div
+                  key={log.id}
+                  className="flex items-start justify-between py-1 border-b border-slate-800/40 text-[11px]"
+                >
+                  <div className="flex items-center space-x-2 truncate">
+                    {icon}
+                    <span className={`truncate ${textColor}`}>{log.message}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono flex-shrink-0 ml-2">
+                    {log.timestamp}
+                  </span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

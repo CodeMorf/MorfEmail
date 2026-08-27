@@ -120,3 +120,90 @@ export interface ToastMessage {
   title: string;
   message?: string;
 }
+
+export type ScheduleInterval = 'hourly_6' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
+export interface ScheduledSearch {
+  id: string;
+  title: string;
+  category: string;
+  country: string;
+  countryCode: string;
+  flag: string;
+  state?: string;
+  city?: string;
+  interval: ScheduleInterval;
+  targetListId: string;
+  targetListName: string;
+  status: 'active' | 'paused';
+  lastRun: string;
+  nextRun: string;
+  leadsHarvestedTotal: number;
+  newLeadsLastRun: number;
+  autoVerifyEmails: boolean;
+  autoDeduplicate: boolean;
+  notifyEmail: boolean;
+  quantityPerRun: number;
+  createdAt: string;
+}
+
+export type AiProviderType = 'openai' | 'gemini' | 'codemorf' | 'custom';
+
+export interface AiConfig {
+  activeProvider: AiProviderType;
+  openai: {
+    apiKey: string;
+    model: string;
+    organization?: string;
+  };
+  gemini: {
+    apiKey: string;
+    model: string;
+  };
+  codemorf: {
+    apiKey: string;
+    model: string;
+    creditsRemaining: number;
+  };
+  custom: {
+    providerName: string;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+  };
+}
+
+export interface ProxyConfig {
+  enabled: boolean;
+  protocol: 'http' | 'https' | 'socks5';
+  host: string;
+  port: number | string;
+  username?: string;
+  password?: string;
+  bypassLocal: boolean;
+  rotatePerRequest: boolean;
+  routeAiRequests: boolean;
+  routeScraping: boolean;
+  routeEmailVerifier: boolean;
+  status: 'connected' | 'idle' | 'testing' | 'error';
+  lastTestedIp?: string;
+  latencyMs?: number;
+}
+
+export interface PolarLicense {
+  licenseKey: string;
+  status: 'active' | 'expired' | 'unregistered' | 'revoked';
+  billingPeriod: 'annual';
+  planName: string;
+  polarCustomerId: string;
+  polarSubscriptionId: string;
+  activationSeatsTotal: number;
+  activationSeatsUsed: number;
+  hardwareId: string;
+  validUntil: string;
+  portalUrl: string;
+  polarDocsUrl: string;
+  polarCheckoutAnnualUrl: string;
+  lastVerifiedAt: string;
+}
+

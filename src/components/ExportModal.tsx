@@ -1,3 +1,8 @@
+/**
+ * ExportModal - MorfEmail Export Window
+ * Genera descargas locales en CSV (RFC 4180 con UTF-8 BOM), Excel (.XLSX) y JSON.
+ */
+
 import React, { useState } from 'react';
 import {
   X,
@@ -7,11 +12,14 @@ import {
   Download,
   CheckSquare,
   Square,
-  CheckCircle2,
-  Table,
-  Sparkles
+  Table
 } from 'lucide-react';
 import { Lead } from '../types';
+import { CsvExporter } from '../../exports/csvExporter';
+import { ExcelExporter } from '../../exports/excelExporter';
+import { JsonExporter } from '../../exports/jsonExporter';
+import { SqliteClient } from '../../engine/database/sqliteClient';
+import { NormalizedLead } from '../../engine/types';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -28,7 +36,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 }) => {
   const [format, setFormat] = useState<'xlsx' | 'csv' | 'json' | 'txt'>('csv');
   const [filterMode, setFilterMode] = useState<'all' | 'verified_only' | 'with_phone'>('all');
-  
+
   const [fields, setFields] = useState({
     companyName: true,
     email: true,
@@ -46,64 +54,81 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   if (!isOpen) return null;
 
   const toggleField = (key: keyof typeof fields) => {
-    setFields(prev => ({ ...prev, [key]: !prev[key] }));
+    setFields((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const getFilteredLeads = () => {
-    if (filterMode === 'verified_only') return leads.filter(l => l.verified === 'verified');
-    if (filterMode === 'with_phone') return leads.filter(l => !!l.phone);
+  const getFilteredLeads = (): Lead[] => {
+    if (filterMode === 'verified_only') return leads.filter((l) => l.verified === 'verified');
+    if (filterMode === 'with_phone') return leads.filter((l) => !!l.phone);
     return leads;
   };
 
   const handleExport = () => {
-    const exportData = getFilteredLeads();
-    
-    if (format === 'json') {
-      const jsonContent = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([jsonContent], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `codemorf-leads-${Date.now()}.json`;
-      link.click();
+    const rawFiltered = getFilteredLeads();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+    // Convertir a NormalizedLead para los exportadores de datos
+    const normalizedLeads: NormalizedLead[] = rawFiltered.map((l) => ({
+      id: l.id,
+      businessName: l.companyName,
+      category: l.category,
+      website: l.website,
+      domain: l.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0],
+      email: l.email,
+      emailStatus: l.verified === 'verified' ? 'valid' : l.verified === 'risky' ? 'risky' : 'unverified',
+      phone: l.phone,
+      whatsapp: l.whatsapp,
+      address: l.address,
+      city: l.city,
+      region: l.state,
+      postalCode: l.postalCode,
+      country: l.country,
+      countryCode: l.countryCode,
+      facebook: l.facebook,
+      instagram: l.instagram,
+      linkedin: l.linkedin,
+      sourceUrl: l.source,
+      discoveredAt: l.extractedAt,
+      updatedAt: l.extractedAt,
+      confidenceScore: l.confidenceScore
+    }));
+
+    const filename = `morfemail_leads_${timestamp}.${format}`;
+
+    if (format === 'csv') {
+      CsvExporter.downloadCsv(normalizedLeads, filename);
+    } else if (format === 'xlsx') {
+      ExcelExporter.downloadExcel(normalizedLeads, filename);
+    } else if (format === 'json') {
+      JsonExporter.downloadJson(normalizedLeads, filename);
     } else if (format === 'txt') {
-      const txtContent = exportData.map(l => 
-        `${l.companyName} | ${l.email} | ${l.phone} | ${l.website} | ${l.city}`
-      ).join('\n');
+      const txtContent = normalizedLeads
+        .map((l) => `${l.businessName} | ${l.email} | ${l.phone} | ${l.website} | ${l.city}`)
+        .join('\r\n');
       const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `codemorf-leads-${Date.now()}.txt`;
+      link.download = filename;
       link.click();
-    } else {
-      // CSV & XLSX simulated as clean CSV
-      const headers = Object.keys(fields).filter(k => fields[k as keyof typeof fields]).join(',');
-      const rows = exportData.map(l => {
-        return [
-          fields.companyName ? `"${l.companyName}"` : null,
-          fields.email ? `"${l.email}"` : null,
-          fields.phone ? `"${l.phone}"` : null,
-          fields.whatsapp ? `"${l.whatsapp || ''}"` : null,
-          fields.website ? `"${l.website}"` : null,
-          fields.city ? `"${l.city}"` : null,
-          fields.country ? `"${l.country}"` : null,
-          fields.category ? `"${l.category}"` : null,
-          fields.socials ? `"${l.instagram || l.linkedin || ''}"` : null,
-          fields.address ? `"${l.address}"` : null,
-          fields.postalCode ? `"${l.postalCode}"` : null
-        ].filter(Boolean).join(',');
-      }).join('\n');
-
-      const csvBlob = new Blob([headers + '\n' + rows], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(csvBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `codemorf-leads-${Date.now()}.${format === 'xlsx' ? 'xlsx' : 'csv'}`;
-      link.click();
+      URL.revokeObjectURL(url);
     }
 
-    addToast('Archivo exportado con éxito', `${exportData.length} leads descargados en formato .${format.toUpperCase()}`, 'success');
+    // Registrar exportación en SQLite local
+    SqliteClient.getInstance().recordExport({
+      id: `exp-${Date.now()}`,
+      file_name: filename,
+      format: format === 'txt' ? 'csv' : format,
+      record_count: normalizedLeads.length,
+      file_size_bytes: normalizedLeads.length * 180,
+      created_at: new Date().toISOString()
+    });
+
+    addToast(
+      'Archivo exportado con éxito',
+      `${normalizedLeads.length} leads guardados en formato .${format.toUpperCase()}`,
+      'success'
+    );
     onClose();
   };
 
@@ -112,18 +137,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-xl w-full p-6 space-y-6 animate-in zoom-in-95 duration-150">
-        
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-[#F04438]">Descarga de Datos</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-[#F04438]">
+              Motor de Exportación Local
+            </span>
             <h2 className="text-xl font-black text-slate-900 tracking-tight">
-              Exportar {targetCount.toLocaleString()} leads
+              Exportar {targetCount.toLocaleString()} prospectos
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"
+            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -144,9 +170,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   : 'border-slate-200 hover:border-slate-300 bg-slate-50'
               }`}
             >
-              <FileSpreadsheet className={`w-6 h-6 mx-auto mb-1.5 ${format === 'xlsx' ? 'text-[#F04438]' : 'text-slate-500'}`} />
+              <FileSpreadsheet
+                className={`w-6 h-6 mx-auto mb-1.5 ${format === 'xlsx' ? 'text-[#F04438]' : 'text-slate-500'}`}
+              />
               <div className="font-bold text-xs text-slate-900">Excel</div>
-              <div className="text-[10px] text-slate-500">.XLSX</div>
+              <div className="text-[10px] text-slate-500">.XLSX Nativo</div>
             </div>
 
             {/* CSV */}
@@ -158,9 +186,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   : 'border-slate-200 hover:border-slate-300 bg-slate-50'
               }`}
             >
-              <Table className={`w-6 h-6 mx-auto mb-1.5 ${format === 'csv' ? 'text-[#F04438]' : 'text-slate-500'}`} />
+              <Table
+                className={`w-6 h-6 mx-auto mb-1.5 ${format === 'csv' ? 'text-[#F04438]' : 'text-slate-500'}`}
+              />
               <div className="font-bold text-xs text-slate-900">CSV</div>
-              <div className="text-[10px] text-slate-500">.CSV</div>
+              <div className="text-[10px] text-slate-500">UTF-8 BOM</div>
             </div>
 
             {/* JSON */}
@@ -172,9 +202,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   : 'border-slate-200 hover:border-slate-300 bg-slate-50'
               }`}
             >
-              <FileCode className={`w-6 h-6 mx-auto mb-1.5 ${format === 'json' ? 'text-[#F04438]' : 'text-slate-500'}`} />
+              <FileCode
+                className={`w-6 h-6 mx-auto mb-1.5 ${format === 'json' ? 'text-[#F04438]' : 'text-slate-500'}`}
+              />
               <div className="font-bold text-xs text-slate-900">JSON</div>
-              <div className="text-[10px] text-slate-500">.JSON</div>
+              <div className="text-[10px] text-slate-500">Estructurado</div>
             </div>
 
             {/* TXT */}
@@ -186,9 +218,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   : 'border-slate-200 hover:border-slate-300 bg-slate-50'
               }`}
             >
-              <FileText className={`w-6 h-6 mx-auto mb-1.5 ${format === 'txt' ? 'text-[#F04438]' : 'text-slate-500'}`} />
+              <FileText
+                className={`w-6 h-6 mx-auto mb-1.5 ${format === 'txt' ? 'text-[#F04438]' : 'text-slate-500'}`}
+              />
               <div className="font-bold text-xs text-slate-900">TXT</div>
-              <div className="text-[10px] text-slate-500">.TXT</div>
+              <div className="text-[10px] text-slate-500">Texto Plano</div>
             </div>
           </div>
         </div>
@@ -202,7 +236,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <button
               type="button"
               onClick={() => setFilterMode('all')}
-              className={`py-2 px-3 rounded-lg border font-medium transition-all ${
+              className={`py-2 px-3 rounded-lg border font-medium transition-all cursor-pointer ${
                 filterMode === 'all'
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -214,7 +248,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <button
               type="button"
               onClick={() => setFilterMode('verified_only')}
-              className={`py-2 px-3 rounded-lg border font-medium transition-all ${
+              className={`py-2 px-3 rounded-lg border font-medium transition-all cursor-pointer ${
                 filterMode === 'verified_only'
                   ? 'bg-emerald-600 text-white border-emerald-600'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -226,7 +260,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <button
               type="button"
               onClick={() => setFilterMode('with_phone')}
-              className={`py-2 px-3 rounded-lg border font-medium transition-all ${
+              className={`py-2 px-3 rounded-lg border font-medium transition-all cursor-pointer ${
                 filterMode === 'with_phone'
                   ? 'bg-amber-600 text-white border-amber-600'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -260,8 +294,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               { key: 'category', label: 'Categoría' },
               { key: 'socials', label: 'Redes sociales' },
               { key: 'address', label: 'Dirección' },
-              { key: 'postalCode', label: 'Código postal' },
-            ].map(f => {
+              { key: 'postalCode', label: 'Código postal' }
+            ].map((f) => {
               const isChecked = fields[f.key as keyof typeof fields];
               return (
                 <div
@@ -290,7 +324,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold"
+            className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
           >
             Cancelar
           </button>
@@ -301,10 +335,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             className="px-6 py-2.5 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg text-xs font-extrabold shadow-md shadow-[#F04438]/20 flex items-center space-x-2 transition-all cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            <span>Exportar archivo .{format.toUpperCase()}</span>
+            <span>Descargar archivo .{format.toUpperCase()}</span>
           </button>
         </div>
-
       </div>
     </div>
   );
