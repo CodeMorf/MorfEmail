@@ -1,0 +1,6 @@
+{
+  "name": "CodeMorf Leads",
+  "description": "Desktop lead generation and business contact extraction software for Windows with Morf AI assistance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
