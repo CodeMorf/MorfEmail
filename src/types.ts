@@ -97,9 +97,15 @@ export interface EmailVerificationItem {
   domain: string;
   mxRecord: boolean;
   smtpCheck: boolean;
-  status: 'valid' | 'risky' | 'invalid';
+  status: 'valid' | 'risky' | 'invalid' | 'unknown';
   confidence: number;
   reason?: string;
+  mxRecords?: { priority: number; exchange: string }[];
+  nullMx?: boolean;
+  disposable?: boolean;
+  freeProvider?: boolean;
+  catchAll?: boolean | null;
+  checkedAt?: string;
 }
 
 export interface MorfAiMessage {

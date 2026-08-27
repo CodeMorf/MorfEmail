@@ -4,15 +4,55 @@
  */
 
 import { EmailValidationService } from '../../engine/validation/emailValidationService';
+import { EmailValidationResult, ValidationOptions, ValidationProgress } from '../../engine/validation/types';
 import { EmailVerificationItem, Lead } from '../types';
-import { DeduplicationEngine } from '../../engine/normalization/deduplicationEngine';
 
 export class ValidationService {
   /**
-   * Valida un lote de correos electrónicos.
+   * Valida un lote de correos electrónicos con soporte de progreso en tiempo real.
    */
-  public static verifyBatch(emails: string[]): EmailVerificationItem[] {
-    return emails.map((e) => EmailValidationService.validate(e));
+  public static async verifyBatch(
+    emails: string[],
+    options: ValidationOptions = {},
+    onProgress?: (progress: ValidationProgress) => void
+  ): Promise<EmailVerificationItem[]> {
+    const rawResults = await EmailValidationService.validateBatch(emails, options, onProgress);
+
+    return rawResults.map(this.mapResultToVerificationItem);
+  }
+
+  /**
+   * Valida un correo electrónico individual.
+   */
+  public static async verifySingle(
+    email: string,
+    options: ValidationOptions = {}
+  ): Promise<EmailVerificationItem> {
+    const raw = await EmailValidationService.validate(email, options);
+    return this.mapResultToVerificationItem(raw);
+  }
+
+  /**
+   * Transforma el resultado del motor detallado al formato de UI EmailVerificationItem.
+   */
+  public static mapResultToVerificationItem(result: EmailValidationResult): EmailVerificationItem {
+    return {
+      id: result.id,
+      email: result.email,
+      syntax: result.syntaxValid,
+      domain: result.domain,
+      mxRecord: result.mxExists,
+      smtpCheck: result.smtpAttempted ? Boolean(result.smtpReachable) : result.mxExists,
+      status: result.status.toLowerCase() as 'valid' | 'risky' | 'invalid' | 'unknown',
+      confidence: result.confidence,
+      reason: result.reason,
+      mxRecords: result.mxRecords,
+      nullMx: result.nullMx,
+      disposable: result.disposable,
+      freeProvider: result.freeProvider,
+      catchAll: result.catchAll,
+      checkedAt: result.checkedAt
+    };
   }
 
   /**
