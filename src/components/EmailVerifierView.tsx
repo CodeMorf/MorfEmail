@@ -35,10 +35,12 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
   const [items, setItems] = useState<EmailVerificationItem[]>([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [enableSmtp, setEnableSmtp] = useState(true);
+  const [enableCatchAll, setEnableCatchAll] = useState(true);
   const [progress, setProgress] = useState<ValidationProgress | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const isCancelledRef = useRef<boolean>(false);
+  const activeQueueRef = useRef<any>(null);
 
   const handleStartVerification = async () => {
     const rawLines = pastedText
@@ -61,13 +63,15 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
 
     setIsVerifying(true);
     setIsPaused(false);
-    isCancelledRef.current = false;
+
     setProgress({
       current: 0,
       total: emailsToVerify.length,
       percent: 0,
       currentEmail: emailsToVerify[0],
-      stepLabel: 'Iniciando motor de validación DNS y sintaxis RFC...',
+      stepLabel: enableSmtp
+        ? 'Iniciando motor de validación DNS, MX, SMTP y Catch-All...'
+        : 'Iniciando motor de validación DNS y sintaxis RFC...',
       validCount: 0,
       riskyCount: 0,
       invalidCount: 0,
@@ -75,24 +79,35 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
       isCancelled: false
     });
 
-    addToast('Verificación iniciada', `Comprobando ${emailsToVerify.length} correos contra registros DNS raíz y RFC 5322...`, 'info');
+    addToast(
+      'Verificación iniciada',
+      `Comprobando ${emailsToVerify.length} correos con ${enableSmtp ? 'DNS, registros MX, sondeo SMTP y Catch-All' : 'DNS y registros MX'}...`,
+      'info'
+    );
 
     try {
-      const verifiedResults = await ValidationService.verifyBatch(
-        emailsToVerify,
-        {
-          dnsConcurrency: 15,
-          timeoutMs: 6000,
-          useCache: true
-        },
-        (prog) => {
+      const session = ValidationService.createQueueSession({
+        dnsConcurrency: 15,
+        timeoutMs: 6000,
+        useCache: true,
+        checkSmtp: enableSmtp,
+        checkCatchAll: enableCatchAll
+      });
+
+      activeQueueRef.current = session.queue;
+
+      const verifiedResults = await session.start(emailsToVerify, {
+        onProgress: (prog) => {
           setProgress(prog);
+          setIsPaused(prog.isPaused);
         }
-      );
+      });
 
       setItems(verifiedResults);
       setIsVerifying(false);
+      setIsPaused(false);
       setProgress(null);
+      activeQueueRef.current = null;
 
       const validTotal = verifiedResults.filter(i => i.status === 'valid').length;
       const invalidTotal = verifiedResults.filter(i => i.status === 'invalid').length;
@@ -105,16 +120,36 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
       );
     } catch (err: any) {
       setIsVerifying(false);
+      setIsPaused(false);
       setProgress(null);
+      activeQueueRef.current = null;
       addToast('Error de verificación', err?.message || 'Ocurrió un problema durante el procesamiento de la lista', 'error');
     }
   };
 
+  const handlePauseToggle = () => {
+    if (!activeQueueRef.current) return;
+
+    if (isPaused) {
+      activeQueueRef.current.resume();
+      setIsPaused(false);
+      addToast('Reanudado', 'Continuando con la cola de verificación.', 'info');
+    } else {
+      activeQueueRef.current.pause();
+      setIsPaused(true);
+      addToast('Pausado', 'Cola de verificación en pausa temporal.', 'info');
+    }
+  };
+
   const handleCancelVerification = () => {
-    isCancelledRef.current = true;
+    if (activeQueueRef.current) {
+      activeQueueRef.current.cancel();
+      activeQueueRef.current = null;
+    }
     setIsVerifying(false);
+    setIsPaused(false);
     setProgress(null);
-    addToast('Verificación cancelada', 'El procesamiento de la cola ha sido detenido.', 'warning');
+    addToast('Verificación cancelada', 'El procesamiento de la cola ha sido detenido inmediatamente.', 'warning');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -408,21 +443,61 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
           </div>
         )}
 
+        {/* Validation Mode Options */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 pb-1 border-t border-slate-100 text-xs">
+          <div className="flex items-center space-x-4">
+            <label className="flex items-center space-x-2 text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={enableSmtp}
+                onChange={(e) => setEnableSmtp(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-[#F04438] focus:ring-[#F04438]"
+              />
+              <span className="font-semibold">Sondeo SMTP puerto 25 (Buzón real)</span>
+            </label>
+
+            <label className="flex items-center space-x-2 text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={enableCatchAll}
+                disabled={!enableSmtp}
+                onChange={(e) => setEnableCatchAll(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-[#F04438] focus:ring-[#F04438] disabled:opacity-50"
+              />
+              <span className="font-semibold">Detectar servidores Catch-All</span>
+            </label>
+          </div>
+
+          <span className="text-[11px] text-slate-400 font-mono">
+            {enableSmtp ? 'Modo Ultra: DNS + MX + SMTP + Catch-All' : 'Modo Rápido: DNS + MX + Sintaxis'}
+          </span>
+        </div>
+
         <div className="flex items-center justify-between pt-2">
           <span className="text-[11px] text-slate-400 flex items-center space-x-1">
             <Info className="w-3 h-3" />
-            <span>Verifica sintaxis RFC 5322, resolución DNS MX real, Null MX y dominios desechables.</span>
+            <span>Verifica sintaxis RFC 5322, resolución DNS MX real, Null MX (RFC 7505) y dominios desechables.</span>
           </span>
 
           <div className="flex items-center space-x-2">
             {isVerifying && (
-              <button
-                onClick={handleCancelVerification}
-                className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer"
-              >
-                <Square className="w-3 h-3 text-red-600" />
-                <span>Detener</span>
-              </button>
+              <>
+                <button
+                  onClick={handlePauseToggle}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer border border-slate-300"
+                >
+                  {isPaused ? <Play className="w-3.5 h-3.5 text-emerald-600" /> : <Pause className="w-3.5 h-3.5 text-amber-600" />}
+                  <span>{isPaused ? 'Reanudar' : 'Pausar'}</span>
+                </button>
+
+                <button
+                  onClick={handleCancelVerification}
+                  className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer"
+                >
+                  <Square className="w-3 h-3 text-red-600" />
+                  <span>Detener</span>
+                </button>
+              </>
             )}
 
             <button
@@ -433,7 +508,7 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
               {isVerifying ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Consultando DNS raíz...</span>
+                  <span>{isPaused ? 'En pausa...' : 'Verificando cola...'}</span>
                 </>
               ) : (
                 <>

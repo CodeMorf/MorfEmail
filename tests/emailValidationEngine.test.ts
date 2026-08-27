@@ -10,6 +10,8 @@ import { FreeProviderService } from '../engine/validation/freeProviderService';
 import { ConfidenceCalculator } from '../engine/validation/confidenceCalculator';
 import { DomainValidationCache } from '../engine/validation/domainValidationCache';
 import { EmailValidationService } from '../engine/validation/emailValidationService';
+import { SmtpValidationService } from '../engine/validation/smtpValidationService';
+import { ValidationService } from '../src/services/validationService';
 
 async function runTests() {
   console.log('====================================================');
@@ -230,6 +232,58 @@ async function runTests() {
   } catch (e: any) {
     console.log(`  (DNS live test omitido o limitado por entorno: ${e?.message})`);
   }
+
+  // ----------------------------------------------------
+  // TEST SUITE 8: CONTROL DE COLA (PAUSA, REANUDACIÓN, CANCELACIÓN) Y CATCH-ALL
+  // ----------------------------------------------------
+  console.log('\n8. Probando Control de Cola y Catch-All:');
+
+  // Test Queue session
+  const session = ValidationService.createQueueSession();
+  assert('createQueueSession retorna cola y ejecutor', Boolean(session.queue) && typeof session.start === 'function');
+  
+  const statusInitial = session.queue.getStatus();
+  assert('Estado inicial de cola no está corriendo', !statusInitial.isRunning && !statusInitial.isPaused && !statusInitial.isCancelled);
+
+  session.queue.pause();
+  assert('Pausa de cola activada correctamente', session.queue.getStatus().isPaused === true);
+
+  session.queue.resume();
+  assert('Reanudación de cola ejecutada correctamente', session.queue.getStatus().isPaused === false);
+
+  session.queue.cancel();
+  assert('Cancelación de cola ejecutada correctamente', session.queue.getStatus().isCancelled === true);
+
+  // Test Smtp probe address generation
+  const probeAddress = SmtpValidationService.generateRandomProbeAddress('empresa.com');
+  assert('Genera dirección de sondeo aleatoria válida', probeAddress.startsWith('morf_probe_') && probeAddress.endsWith('@empresa.com'));
+
+  // Test Confidence Calculator with Catch-All
+  const catchAllResult = ConfidenceCalculator.calculate({
+    syntaxValid: true,
+    dnsResult: {
+      domain: 'empresa.com',
+      domainExists: true,
+      mxExists: true,
+      mxRecords: [{ priority: 10, exchange: 'mail.empresa.com' }],
+      nullMx: false
+    },
+    isDisposable: false,
+    isFreeProvider: false,
+    isRoleAccount: false,
+    smtpResult: {
+      attempted: true,
+      reachable: true,
+      recipientAccepted: true,
+      catchAll: true,
+      technicalStatus: 'RISKY',
+      responseCode: 250,
+      responseMessage: '250 OK'
+    }
+  });
+
+  assert('Catch-All detectado califica como estado RISKY', catchAllResult.status === 'RISKY');
+  assert('Catch-All aplica penalización adecuada en score', catchAllResult.signals.catchAllPenalty === -20);
 
   console.log('\n====================================================');
   console.log(` Resumen de Pruebas: ${passed} Pasadas | ${failed} Fallidas`);

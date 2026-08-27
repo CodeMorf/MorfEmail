@@ -115,6 +115,13 @@ export class EmailValidationService {
   }
 
   /**
+   * Crea y devuelve una instancia controlable de ValidationQueue.
+   */
+  public static createQueue(options: ValidationOptions = {}): ValidationQueue {
+    return new ValidationQueue(options);
+  }
+
+  /**
    * Valida un lote de correos electrónicos mediante la cola de concurrencia.
    */
   public static async validateBatch(

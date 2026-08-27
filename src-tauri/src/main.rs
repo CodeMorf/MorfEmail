@@ -189,13 +189,13 @@ async fn get_dns_mx(domain: String) -> Vec<MxRecordDto> {
     res.mx_records
 }
 
-// 6. Verificación SMTP Opcional y Segura mediante Handshake
+// 6. Verificación SMTP Real y Detección Catch-All mediante Handshake
 #[tauri::command]
 async fn verify_email_smtp(
     email: String,
     mx_host: String,
     timeout_ms: Option<u64>,
-    _check_catch_all: Option<bool>
+    check_catch_all: Option<bool>
 ) -> SmtpVerificationResult {
     let timeout_duration = Duration::from_millis(timeout_ms.unwrap_or(5000));
     let target_addr = format!("{}:25", mx_host.trim_end_matches('.'));
@@ -227,7 +227,7 @@ async fn verify_email_smtp(
         }
     };
 
-    // Leer banner 220
+    // Leer banner inicial 220
     let mut buf = [0u8; 1024];
     let _ = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await;
 
@@ -239,7 +239,7 @@ async fn verify_email_smtp(
     let _ = stream.write_all(b"MAIL FROM:<probe@morfemail.desktop>\r\n").await;
     let _ = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await;
 
-    // Enviar RCPT TO
+    // Enviar RCPT TO para el correo objetivo
     let rcpt_cmd = format!("RCPT TO:<{}>\r\n", email);
     let _ = stream.write_all(rcpt_cmd.as_bytes()).await;
     
@@ -250,20 +250,62 @@ async fn verify_email_smtp(
         }
     }
 
-    // Enviar QUIT respetuosamente
-    let _ = stream.write_all(b"QUIT\r\n").await;
-
     let is_250 = response_str.starts_with("250");
     let is_550 = response_str.starts_with("550") || response_str.starts_with("551") || response_str.starts_with("553");
+
+    let mut is_catch_all = None;
+
+    // Si el correo objetivo es aceptado (250 OK) y se solicita verificar Catch-All,
+    // sondeamos un buzón aleatorio que garantizadamente no existe en el dominio
+    if is_250 && check_catch_all.unwrap_or(false) {
+        if let Some(domain) = email.split('@').nth(1) {
+            let random_probe = format!(
+                "RCPT TO:<morf_probe_{:x}_{:x}@{}>\r\n",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis(),
+                std::process::id() ^ 0xABCD,
+                domain
+            );
+
+            let _ = stream.write_all(random_probe.as_bytes()).await;
+            let mut catch_buf = [0u8; 1024];
+            if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(2500), stream.read(&mut catch_buf)).await {
+                if n > 0 {
+                    let probe_resp = String::from_utf8_lossy(&catch_buf[..n]);
+                    // Si el servidor también devuelve 250 al buzón aleatorio inexistente, es un Catch-All
+                    if probe_resp.starts_with("250") {
+                        is_catch_all = Some(true);
+                    } else if probe_resp.starts_with("550") || probe_resp.starts_with("551") || probe_resp.starts_with("553") {
+                        is_catch_all = Some(false);
+                    }
+                }
+            }
+        }
+    }
+
+    // Enviar QUIT respetuosamente para cerrar la conexión
+    let _ = stream.write_all(b"QUIT\r\n").await;
+
+    let technical_status = if is_catch_all == Some(true) {
+        "RISKY".to_string()
+    } else if is_250 {
+        "DELIVERABLE".to_string()
+    } else if is_550 {
+        "UNDELIVERABLE".to_string()
+    } else {
+        "UNKNOWN".to_string()
+    };
 
     SmtpVerificationResult {
         attempted: true,
         reachable: true,
         recipient_accepted: if is_250 { Some(true) } else if is_550 { Some(false) } else { None },
-        catch_all: None,
+        catch_all: is_catch_all,
         response_code: if is_250 { Some(250) } else if is_550 { Some(550) } else { None },
         response_message: Some(response_str.trim().to_string()),
-        technical_status: if is_250 { "DELIVERABLE".into() } else if is_550 { "UNDELIVERABLE".into() } else { "UNKNOWN".into() },
+        technical_status,
     }
 }
 

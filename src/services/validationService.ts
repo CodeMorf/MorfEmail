@@ -5,9 +5,44 @@
 
 import { EmailValidationService } from '../../engine/validation/emailValidationService';
 import { EmailValidationResult, ValidationOptions, ValidationProgress } from '../../engine/validation/types';
+import { ValidationQueue } from '../../engine/validation/validationQueue';
 import { EmailVerificationItem, Lead } from '../types';
 
 export class ValidationService {
+  /**
+   * Crea una sesión de cola interactiva que permite pausar, reanudar o cancelar el lote en ejecución.
+   */
+  public static createQueueSession(options: ValidationOptions = {}): {
+    queue: ValidationQueue;
+    start: (
+      emails: string[],
+      callbacks?: {
+        onProgress?: (progress: ValidationProgress) => void;
+        onItem?: (item: EmailVerificationItem) => void;
+      }
+    ) => Promise<EmailVerificationItem[]>;
+  } {
+    const queue = EmailValidationService.createQueue(options);
+
+    const start = async (
+      emails: string[],
+      callbacks?: {
+        onProgress?: (progress: ValidationProgress) => void;
+        onItem?: (item: EmailVerificationItem) => void;
+      }
+    ): Promise<EmailVerificationItem[]> => {
+      const rawResults = await queue.process(emails, {
+        onProgress: callbacks?.onProgress,
+        onItem: callbacks?.onItem
+          ? (res) => callbacks.onItem!(ValidationService.mapResultToVerificationItem(res))
+          : undefined
+      });
+      return rawResults.map(ValidationService.mapResultToVerificationItem);
+    };
+
+    return { queue, start };
+  }
+
   /**
    * Valida un lote de correos electrónicos con soporte de progreso en tiempo real.
    */
