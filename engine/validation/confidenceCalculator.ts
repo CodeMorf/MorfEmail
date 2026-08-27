@@ -148,20 +148,28 @@ export class ConfidenceCalculator {
     // Evaluar SMTP si fue ejecutado
     if (smtpResult && smtpResult.attempted) {
       if (smtpResult.recipientAccepted === true) {
-        smtpScore = 10;
+        if (smtpResult.catchAll === true) {
+          status = 'RISKY';
+          catchAllPenalty = -20;
+          smtpScore = 5;
+          reason = 'Servidor configurado en modo Catch-All (acepta cualquier dirección entrante)';
+        } else {
+          status = 'VALID';
+          smtpScore = 15;
+          reason = 'Buzón verificado y aceptado por el servidor de correo (250 OK)';
+        }
       } else if (smtpResult.recipientAccepted === false) {
         status = 'INVALID';
-        reason = 'Buzón rechazado por el servidor de correo (550 Mailbox not found)';
+        reason = 'Buzón rechazado por el servidor de correo (550 Mailbox not found / Recipient rejected)';
         smtpScore = -50;
-      } else if (smtpResult.technicalStatus === 'UNKNOWN') {
-        // UNKNOWN no es invalid
-        reason = 'Servidores MX activos; verificación SMTP restringida por cortafuegos';
-      }
-
-      if (smtpResult.catchAll === true) {
+      } else if (smtpResult.greylisted || smtpResult.responseCode === 450 || smtpResult.responseCode === 451) {
         status = 'RISKY';
-        catchAllPenalty = -20;
-        reason = 'Servidor configurado en modo Catch-All (acepta cualquier dirección entrante)';
+        smtpScore = -10;
+        reason = 'Servidor respondió con Greylisting temporal (450/451); reintento posterior requerido';
+      } else if (smtpResult.technicalStatus === 'UNKNOWN') {
+        // Cuando SMTP fue activado pero resultó inconcluso (timeout/puerto 25 bloqueado), NO se marca como VALID
+        status = 'UNKNOWN';
+        reason = smtpResult.responseMessage || 'Servidores MX no alcanzables en puerto 25 (Timeout o bloqueo de cortafuegos)';
       }
     }
 

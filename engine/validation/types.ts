@@ -26,8 +26,11 @@ export interface SmtpValidationResult {
   reachable: boolean;
   recipientAccepted?: boolean | null;
   catchAll?: boolean | null;
+  greylisted?: boolean;
   responseCode?: number;
   responseMessage?: string;
+  selectedMx?: string;
+  triedMxCount?: number;
   technicalStatus: 'DELIVERABLE' | 'UNDELIVERABLE' | 'RISKY' | 'UNKNOWN';
   error?: string;
   durationMs?: number;
@@ -49,6 +52,7 @@ export interface EmailValidationResult {
   smtpReachable: boolean;
   recipientAccepted?: boolean | null;
   catchAll?: boolean | null;
+  greylisted?: boolean;
   status: ValidationStatus;
   confidence: number;
   reason: string;
@@ -76,4 +80,5 @@ export interface ValidationOptions {
   dnsConcurrency?: number;
   smtpConcurrency?: number;
   useCache?: boolean;
+  signal?: AbortSignal;
 }

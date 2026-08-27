@@ -64,15 +64,15 @@ export class EmailValidationService {
 
     // 3. Nivel 3: Consulta DNS Real (MX, A, AAAA, Null MX RFC 7505)
     const timeoutMs = options.timeoutMs || 5000;
-    const dnsResult = await DnsResolverService.resolveDomainDns(domain, timeoutMs);
+    const dnsResult = await DnsResolverService.resolveDomainDns(domain, timeoutMs, options.signal);
 
-    // 4. Nivel 6: Comprobación SMTP segura (opcional)
+    // 4. Nivel 6: Comprobación SMTP segura Multi-MX (opcional)
     let smtpResult = null;
     if (options.checkSmtp && dnsResult.mxExists && dnsResult.mxRecords.length > 0 && !dnsResult.nullMx) {
-      const primaryMx = dnsResult.mxRecords[0].exchange;
-      smtpResult = await SmtpValidationService.verifySmtp(normalizedEmail, primaryMx, {
+      smtpResult = await SmtpValidationService.verifySmtp(normalizedEmail, dnsResult.mxRecords, {
         timeoutMs: 4000,
-        checkCatchAll: options.checkCatchAll
+        checkCatchAll: options.checkCatchAll,
+        signal: options.signal
       });
     }
 
@@ -106,6 +106,7 @@ export class EmailValidationService {
       smtpReachable: smtpResult ? smtpResult.reachable : false,
       recipientAccepted: smtpResult ? smtpResult.recipientAccepted : null,
       catchAll: smtpResult ? smtpResult.catchAll : null,
+      greylisted: smtpResult ? smtpResult.greylisted : false,
       status: breakdown.status,
       confidence: breakdown.score,
       reason: breakdown.reason,

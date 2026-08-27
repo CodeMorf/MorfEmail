@@ -285,6 +285,109 @@ async function runTests() {
   assert('Catch-All detectado califica como estado RISKY', catchAllResult.status === 'RISKY');
   assert('Catch-All aplica penalización adecuada en score', catchAllResult.signals.catchAllPenalty === -20);
 
+  // ----------------------------------------------------
+  // TEST SUITE 9: SMTP MULTILÍNEA Y EVALUACIÓN DE CÓDIGOS RFC 5321
+  // ----------------------------------------------------
+  console.log('\n9. Probando Parser Multilínea SMTP y Evaluación de Códigos:');
+
+  // Test multiline parser
+  const multilineSample = "250-mx.google.com at your service\r\n250-SIZE 157286400\r\n250-8BITMIME\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-PIPELINING\r\n250-CHUNKING\r\n250 SMTPUTF8";
+  const parsedMulti = SmtpValidationService.parseMultilineResponse(multilineSample);
+  assert('Parsea respuesta multilínea RFC 5321 correctamente', parsedMulti.isComplete && parsedMulti.isMultiline && parsedMulti.code === 250);
+  assert('Contiene todas las líneas de respuesta', parsedMulti.lines.length === 8);
+
+  // Test single line 250 OK
+  const parsed250 = SmtpValidationService.parseMultilineResponse("250 2.1.5 Recipient OK");
+  assert('Parsea 250 OK simple', parsed250.code === 250 && parsed250.isComplete && !parsed250.isMultiline);
+
+  // Test 550 Mailbox not found
+  const parsed550 = SmtpValidationService.parseMultilineResponse("550 5.1.1 <fakeuser@domain.com>: Recipient address rejected: User unknown");
+  assert('Parsea 550 Recipient rejected', parsed550.code === 550 && !parsed550.isGreylisted);
+
+  const eval550 = SmtpValidationService.evaluateSmtpCode(550, parsed550.message);
+  assert('Código 550 evalúa a UNDELIVERABLE con recipientAccepted = false', eval550.technicalStatus === 'UNDELIVERABLE' && eval550.recipientAccepted === false);
+
+  // Test 551, 552, 553, 554
+  for (const code of [551, 552, 553, 554]) {
+    const evalCode = SmtpValidationService.evaluateSmtpCode(code, 'Permanent error');
+    assert(`Código ${code} evalúa a UNDELIVERABLE`, evalCode.technicalStatus === 'UNDELIVERABLE' && evalCode.recipientAccepted === false);
+  }
+
+  // Test 450 / 451 Greylisting
+  const parsedGreylist450 = SmtpValidationService.parseMultilineResponse("450 4.2.0 <user@domain.com>: Greylisted, please try again in 300 seconds");
+  assert('Detecta 450 como greylisted', parsedGreylist450.isGreylisted && parsedGreylist450.code === 450);
+  const eval450 = SmtpValidationService.evaluateSmtpCode(450, parsedGreylist450.message);
+  assert('450 Greylisted evalúa a RISKY con recipientAccepted = null', eval450.technicalStatus === 'RISKY' && eval450.recipientAccepted === null);
+
+  const eval451 = SmtpValidationService.evaluateSmtpCode(451, "451 4.7.1 Service unavailable - try again later");
+  assert('451 Greylisted evalúa a RISKY', eval451.technicalStatus === 'RISKY' && eval451.isGreylisted);
+
+  // Test 421 Service unavailable (debe ser UNKNOWN para intentar siguiente MX)
+  const eval421 = SmtpValidationService.evaluateSmtpCode(421, "421 4.7.0 Too many connections, closing transmission channel");
+  assert('421 evalúa a UNKNOWN con isTemporary = true', eval421.technicalStatus === 'UNKNOWN' && eval421.isTemporary);
+
+  // ----------------------------------------------------
+  // TEST SUITE 10: REGLAS DE CONFIANZA SMTP (UNKNOWN != INVALID / NO FALSE DELIVERABLE)
+  // ----------------------------------------------------
+  console.log('\n10. Probando Reglas de Confianza e Inconcluso SMTP:');
+
+  // Caso: SMTP solicitado pero falló por timeout / puerto 25 bloqueado
+  const smtpUnknownCalc = ConfidenceCalculator.calculate({
+    syntaxValid: true,
+    dnsResult: {
+      domain: 'banco.com',
+      domainExists: true,
+      mxExists: true,
+      mxRecords: [{ priority: 10, exchange: 'mx1.banco.com' }, { priority: 20, exchange: 'mx2.banco.com' }],
+      nullMx: false
+    },
+    isDisposable: false,
+    isFreeProvider: false,
+    smtpResult: {
+      attempted: true,
+      reachable: false,
+      technicalStatus: 'UNKNOWN',
+      responseMessage: 'Timeout en puerto 25'
+    }
+  });
+  assert('SMTP inconcluso (timeout/bloqueo) da estado UNKNOWN (nunca INVALID ni falso VALID)', smtpUnknownCalc.status === 'UNKNOWN');
+
+  // Caso: SMTP con greylisting 450 da estado RISKY
+  const smtpGreylistCalc = ConfidenceCalculator.calculate({
+    syntaxValid: true,
+    dnsResult: {
+      domain: 'empresa.es',
+      domainExists: true,
+      mxExists: true,
+      mxRecords: [{ priority: 10, exchange: 'mail.empresa.es' }],
+      nullMx: false
+    },
+    isDisposable: false,
+    isFreeProvider: false,
+    smtpResult: {
+      attempted: true,
+      reachable: true,
+      greylisted: true,
+      responseCode: 450,
+      technicalStatus: 'RISKY',
+      responseMessage: '450 Greylisted'
+    }
+  });
+  assert('SMTP Greylisted da estado RISKY con mensaje explicativo', smtpGreylistCalc.status === 'RISKY');
+
+  // ----------------------------------------------------
+  // TEST SUITE 11: CANCELACIÓN REAL MEDIANTE ABORTSIGNAL
+  // ----------------------------------------------------
+  console.log('\n11. Probando Cancelación Real con AbortSignal:');
+
+  const abortController = new AbortController();
+  abortController.abort();
+
+  const abortedSmtp = await SmtpValidationService.verifySmtp('test@google.com', 'aspmx.l.google.com', {
+    signal: abortController.signal
+  });
+  assert('SmtpValidationService cancela inmediatamente cuando el signal está abortado', abortedSmtp.technicalStatus === 'UNKNOWN' && abortedSmtp.error?.includes('cancelada'));
+
   console.log('\n====================================================');
   console.log(` Resumen de Pruebas: ${passed} Pasadas | ${failed} Fallidas`);
   console.log('====================================================\n');

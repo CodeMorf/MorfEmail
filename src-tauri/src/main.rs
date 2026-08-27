@@ -189,76 +189,145 @@ async fn get_dns_mx(domain: String) -> Vec<MxRecordDto> {
     res.mx_records
 }
 
-// 6. Verificación SMTP Real y Detección Catch-All mediante Handshake
-#[tauri::command]
-async fn verify_email_smtp(
-    email: String,
-    mx_host: String,
-    timeout_ms: Option<u64>,
-    check_catch_all: Option<bool>
-) -> SmtpVerificationResult {
-    let timeout_duration = Duration::from_millis(timeout_ms.unwrap_or(5000));
-    let target_addr = format!("{}:25", mx_host.trim_end_matches('.'));
+// 6. Verificación SMTP Real, Multi-MX y Detección Catch-All mediante Handshake Robusto
+fn is_smtp_response_complete(text: &str) -> Option<u16> {
+    let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let last_line = lines.last()?;
+    if last_line.len() >= 3 {
+        let code_str = &last_line[0..3];
+        if let Ok(code) = code_str.parse::<u16>() {
+            if last_line.len() > 3 && last_line.as_bytes()[3] == b'-' {
+                return None; // Línea de continuación (multilínea)
+            }
+            return Some(code);
+        }
+    }
+    None
+}
 
-    let connect_fut = TcpStream::connect(&target_addr);
-    let mut stream = match tokio::time::timeout(timeout_duration, connect_fut).await {
+async fn read_smtp_response(
+    stream: &mut TcpStream,
+    timeout: Duration,
+) -> Result<(u16, String), String> {
+    let mut response_text = String::new();
+    let mut buffer = [0u8; 1024];
+    let start = std::time::Instant::now();
+
+    loop {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
+            return Err("Timeout esperando respuesta del servidor SMTP".into());
+        }
+        let remaining = timeout - elapsed;
+
+        match tokio::time::timeout(remaining, stream.read(&mut buffer)).await {
+            Ok(Ok(0)) => return Err("Conexión cerrada por el servidor SMTP remoto".into()),
+            Ok(Ok(n)) => {
+                response_text.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                if let Some(code) = is_smtp_response_complete(&response_text) {
+                    return Ok((code, response_text));
+                }
+            }
+            Ok(Err(e)) => return Err(format!("Error de lectura en socket TCP: {}", e)),
+            Err(_) => return Err("Timeout esperando fin de respuesta SMTP".into()),
+        }
+    }
+}
+
+async fn verify_single_mx_smtp(
+    email: &str,
+    mx_host: &str,
+    check_catch_all: bool,
+    timeout_ms: u64,
+) -> Result<SmtpVerificationResult, String> {
+    let target_addr = format!("{}:25", mx_host.trim_end_matches('.'));
+    let connect_timeout = Duration::from_millis(std::cmp::min(timeout_ms, 3500));
+
+    // 1. Conexión TCP con timeout independiente
+    let mut stream = match tokio::time::timeout(connect_timeout, TcpStream::connect(&target_addr)).await {
         Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            return SmtpVerificationResult {
-                attempted: true,
-                reachable: false,
-                recipient_accepted: None,
-                catch_all: None,
-                response_code: None,
-                response_message: Some(format!("Error de conexión al puerto 25: {}", e)),
-                technical_status: "UNKNOWN".into(),
-            };
-        }
-        Err(_) => {
-            return SmtpVerificationResult {
-                attempted: true,
-                reachable: false,
-                recipient_accepted: None,
-                catch_all: None,
-                response_code: None,
-                response_message: Some("Tiempo de espera agotado al conectar al puerto 25".into()),
-                technical_status: "UNKNOWN".into(),
-            };
-        }
+        Ok(Err(e)) => return Err(format!("Fallo al conectar a {}: {}", target_addr, e)),
+        Err(_) => return Err(format!("Timeout al conectar a {}", target_addr)),
     };
 
-    // Leer banner inicial 220
-    let mut buf = [0u8; 1024];
-    let _ = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await;
+    // 2. Lectura de banner inicial 220
+    let (banner_code, _) = read_smtp_response(&mut stream, Duration::from_millis(2500)).await?;
+    if banner_code != 220 {
+        let _ = stream.write_all(b"QUIT\r\n").await;
+        return Err(format!("Banner inesperado de {}: {}", mx_host, banner_code));
+    }
 
-    // Enviar EHLO
-    let _ = stream.write_all(b"EHLO verify.morfemail.desktop\r\n").await;
-    let _ = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await;
-
-    // Enviar MAIL FROM
-    let _ = stream.write_all(b"MAIL FROM:<probe@morfemail.desktop>\r\n").await;
-    let _ = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await;
-
-    // Enviar RCPT TO para el correo objetivo
-    let rcpt_cmd = format!("RCPT TO:<{}>\r\n", email);
-    let _ = stream.write_all(rcpt_cmd.as_bytes()).await;
-    
-    let mut response_str = String::new();
-    if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(3000), stream.read(&mut buf)).await {
-        if n > 0 {
-            response_str = String::from_utf8_lossy(&buf[..n]).to_string();
+    // 3. Envío de EHLO / HELO
+    stream.write_all(b"EHLO verify.morfemail.desktop\r\n").await
+        .map_err(|e| format!("Error enviando EHLO: {}", e))?;
+    let (ehlo_code, _) = read_smtp_response(&mut stream, Duration::from_millis(2500)).await?;
+    if ehlo_code != 250 {
+        // Fallback a HELO clásico si EHLO es rechazado
+        stream.write_all(b"HELO verify.morfemail.desktop\r\n").await
+            .map_err(|e| format!("Error enviando HELO: {}", e))?;
+        let (helo_code, _) = read_smtp_response(&mut stream, Duration::from_millis(2500)).await?;
+        if helo_code != 250 {
+            let _ = stream.write_all(b"QUIT\r\n").await;
+            return Err(format!("Servidor rechazó EHLO/HELO con código {}", helo_code));
         }
     }
 
-    let is_250 = response_str.starts_with("250");
-    let is_550 = response_str.starts_with("550") || response_str.starts_with("551") || response_str.starts_with("553");
+    // 4. Envío de MAIL FROM
+    stream.write_all(b"MAIL FROM:<probe@morfemail.desktop>\r\n").await
+        .map_err(|e| format!("Error enviando MAIL FROM: {}", e))?;
+    let (mail_code, mail_resp) = read_smtp_response(&mut stream, Duration::from_millis(2500)).await?;
+    if mail_code != 250 {
+        let _ = stream.write_all(b"QUIT\r\n").await;
+        // Detectar 421 (service closing) o 450/451 (greylisting en MAIL FROM)
+        if mail_code == 421 {
+            return Err(format!("Servidor cerrando canal (421): {}", mail_resp.trim()));
+        }
+        if mail_code == 450 || mail_code == 451 || mail_resp.to_lowercase().contains("greylist") {
+            return Ok(SmtpVerificationResult {
+                attempted: true,
+                reachable: true,
+                recipient_accepted: None,
+                catch_all: None,
+                response_code: Some(mail_code),
+                response_message: Some(mail_resp.trim().to_string()),
+                technical_status: "RISKY".into(),
+            });
+        }
+        return Err(format!("Servidor rechazó MAIL FROM con código {}: {}", mail_code, mail_resp.trim()));
+    }
+
+    // 5. Envío de RCPT TO para el correo objetivo
+    let rcpt_cmd = format!("RCPT TO:<{}>\r\n", email);
+    stream.write_all(rcpt_cmd.as_bytes()).await
+        .map_err(|e| format!("Error enviando RCPT TO: {}", e))?;
+    let (rcpt_code, rcpt_resp) = read_smtp_response(&mut stream, Duration::from_millis(3500)).await?;
+
+    let is_250 = rcpt_code == 250;
+    let is_undeliverable = rcpt_code == 550 || rcpt_code == 551 || rcpt_code == 552 || rcpt_code == 553 || rcpt_code == 554;
+    let is_greylisted = rcpt_code == 450 || rcpt_code == 451 || rcpt_code == 452 || rcpt_resp.to_lowercase().contains("greylist") || rcpt_resp.to_lowercase().contains("deferred");
+    let is_service_unavailable = rcpt_code == 421;
+
+    if is_service_unavailable {
+        let _ = stream.write_all(b"QUIT\r\n").await;
+        return Err(format!("Servidor cerró conexión temporalmente (421): {}", rcpt_resp.trim()));
+    }
 
     let mut is_catch_all = None;
 
-    // Si el correo objetivo es aceptado (250 OK) y se solicita verificar Catch-All,
-    // sondeamos un buzón aleatorio que garantizadamente no existe en el dominio
-    if is_250 && check_catch_all.unwrap_or(false) {
+    // 6. Prueba Catch-All con RSET previo si el destinatario principal fue aceptado (250)
+    if is_250 && check_catch_all {
         if let Some(domain) = email.split('@').nth(1) {
+            // Enviar RSET para resetear la transacción SMTP antes del sondeo
+            let _ = stream.write_all(b"RSET\r\n").await;
+            let _ = read_smtp_response(&mut stream, Duration::from_millis(1500)).await;
+
+            // Re-enviar MAIL FROM tras RSET
+            let _ = stream.write_all(b"MAIL FROM:<probe@morfemail.desktop>\r\n").await;
+            let _ = read_smtp_response(&mut stream, Duration::from_millis(1500)).await;
+
             let random_probe = format!(
                 "RCPT TO:<morf_probe_{:x}_{:x}@{}>\r\n",
                 std::time::SystemTime::now()
@@ -270,42 +339,114 @@ async fn verify_email_smtp(
             );
 
             let _ = stream.write_all(random_probe.as_bytes()).await;
-            let mut catch_buf = [0u8; 1024];
-            if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(2500), stream.read(&mut catch_buf)).await {
-                if n > 0 {
-                    let probe_resp = String::from_utf8_lossy(&catch_buf[..n]);
-                    // Si el servidor también devuelve 250 al buzón aleatorio inexistente, es un Catch-All
-                    if probe_resp.starts_with("250") {
-                        is_catch_all = Some(true);
-                    } else if probe_resp.starts_with("550") || probe_resp.starts_with("551") || probe_resp.starts_with("553") {
-                        is_catch_all = Some(false);
-                    }
+            if let Ok((probe_code, _)) = read_smtp_response(&mut stream, Duration::from_millis(2500)).await {
+                if probe_code == 250 {
+                    is_catch_all = Some(true);
+                } else if probe_code >= 550 && probe_code <= 554 {
+                    is_catch_all = Some(false);
                 }
             }
         }
     }
 
-    // Enviar QUIT respetuosamente para cerrar la conexión
+    // 7. Enviar QUIT respetuosamente
     let _ = stream.write_all(b"QUIT\r\n").await;
 
     let technical_status = if is_catch_all == Some(true) {
         "RISKY".to_string()
+    } else if is_greylisted {
+        "RISKY".to_string()
     } else if is_250 {
         "DELIVERABLE".to_string()
-    } else if is_550 {
+    } else if is_undeliverable {
         "UNDELIVERABLE".to_string()
     } else {
         "UNKNOWN".to_string()
     };
 
-    SmtpVerificationResult {
+    Ok(SmtpVerificationResult {
         attempted: true,
         reachable: true,
-        recipient_accepted: if is_250 { Some(true) } else if is_550 { Some(false) } else { None },
+        recipient_accepted: if is_250 {
+            Some(true)
+        } else if is_undeliverable {
+            Some(false)
+        } else {
+            None
+        },
         catch_all: is_catch_all,
-        response_code: if is_250 { Some(250) } else if is_550 { Some(550) } else { None },
-        response_message: Some(response_str.trim().to_string()),
+        response_code: Some(rcpt_code),
+        response_message: Some(rcpt_resp.trim().to_string()),
         technical_status,
+    })
+}
+
+#[tauri::command]
+async fn verify_email_smtp(
+    email: String,
+    mx_host: Option<String>,
+    mx_hosts: Option<Vec<String>>,
+    timeout_ms: Option<u64>,
+    check_catch_all: Option<bool>
+) -> SmtpVerificationResult {
+    let timeout = timeout_ms.unwrap_or(5000);
+    let check_ca = check_catch_all.unwrap_or(false);
+
+    // Unificar lista de servidores MX (hasta 3 servidores para failover Multi-MX)
+    let mut hosts: Vec<String> = Vec::new();
+    if let Some(list) = mx_hosts {
+        for h in list {
+            if !h.trim().is_empty() && !hosts.contains(&h) {
+                hosts.push(h);
+            }
+        }
+    }
+    if let Some(single) = mx_host {
+        if !single.trim().is_empty() && !hosts.contains(&single) {
+            hosts.push(single);
+        }
+    }
+
+    if hosts.is_empty() {
+        return SmtpVerificationResult {
+            attempted: false,
+            reachable: false,
+            recipient_accepted: None,
+            catch_all: None,
+            response_code: None,
+            response_message: Some("No se proporcionaron servidores MX para la verificación SMTP".into()),
+            technical_status: "UNKNOWN".into(),
+        };
+    }
+
+    // Probar hasta 3 servidores MX en orden de prioridad
+    let max_hosts = std::cmp::min(hosts.len(), 3);
+    let mut last_error = String::new();
+
+    for i in 0..max_hosts {
+        let current_host = &hosts[i];
+        match verify_single_mx_smtp(&email, current_host, check_ca, timeout).await {
+            Ok(result) => {
+                // Si obtuvimos un resultado definitivo (DELIVERABLE, UNDELIVERABLE o RISKY con respuesta válida), retornarlo
+                return result;
+            }
+            Err(err_msg) => {
+                last_error = err_msg;
+                // Si este MX falló por timeout/421/conexión, intentar automáticamente el siguiente MX
+                continue;
+            }
+        }
+    }
+
+    // Si se agotaron todos los MX disponibles sin respuesta concluyente, devolver UNKNOWN (nunca INVALID)
+    SmtpVerificationResult {
+        attempted: true,
+        reachable: false,
+        recipient_accepted: None,
+        catch_all: None,
+        response_code: None,
+        response_message: Some(format!("Comprobación agotada en {} servidores MX: {}", max_hosts, last_error)),
+        technical_status: "UNKNOWN".into(),
     }
 }
 

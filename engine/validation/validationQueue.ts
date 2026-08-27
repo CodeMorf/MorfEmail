@@ -6,14 +6,14 @@
 
 import { EmailValidationResult, ValidationOptions, ValidationProgress } from './types';
 import { EmailValidationService } from './emailValidationService';
+import { CancellationToken } from './cancellationToken';
 
 export type ProgressCallback = (progress: ValidationProgress) => void;
 export type ItemCallback = (result: EmailValidationResult) => void;
 
 export class ValidationQueue {
   private isRunning: boolean = false;
-  private isPaused: boolean = false;
-  private isCancelled: boolean = false;
+  private cancellationToken: CancellationToken = new CancellationToken();
   private queue: string[] = [];
   private totalCount: number = 0;
   private completedCount: number = 0;
@@ -31,6 +31,14 @@ export class ValidationQueue {
     this.concurrency = options.dnsConcurrency || 10;
   }
 
+  public get isPaused(): boolean {
+    return this.cancellationToken.isPaused;
+  }
+
+  public get isCancelled(): boolean {
+    return this.cancellationToken.isCancelled;
+  }
+
   /**
    * Ejecuta la cola de validación sobre una lista de correos electrónicos.
    */
@@ -38,6 +46,7 @@ export class ValidationQueue {
     emails: string[],
     callbacks?: { onProgress?: ProgressCallback; onItem?: ItemCallback }
   ): Promise<EmailValidationResult[]> {
+    this.cancellationToken = new CancellationToken();
     this.queue = [...emails];
     this.totalCount = emails.length;
     this.completedCount = 0;
@@ -45,8 +54,6 @@ export class ValidationQueue {
     this.riskyCount = 0;
     this.invalidCount = 0;
     this.isRunning = true;
-    this.isPaused = false;
-    this.isCancelled = false;
 
     this.onProgress = callbacks?.onProgress;
     this.onItem = callbacks?.onItem;
@@ -57,26 +64,34 @@ export class ValidationQueue {
     let currentIndex = 0;
 
     const worker = async () => {
-      while (currentIndex < this.queue.length && !this.isCancelled) {
-        if (this.isPaused) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+      while (currentIndex < this.queue.length && !this.cancellationToken.isCancelled) {
+        if (this.cancellationToken.isPaused) {
+          await new Promise(resolve => setTimeout(resolve, 150));
           continue;
         }
 
         const index = currentIndex++;
-        if (index >= this.queue.length) break;
+        if (index >= this.queue.length || this.cancellationToken.isCancelled) break;
 
         const email = this.queue[index];
 
         this.emitProgress(email, 'Consultando registros de zona DNS y MX...');
 
         try {
-          const result = await EmailValidationService.validate(email, this.options);
+          const result = await EmailValidationService.validate(email, {
+            ...this.options,
+            signal: this.cancellationToken.signal
+          });
+
+          if (this.cancellationToken.isCancelled) {
+            break;
+          }
+
           results[index] = result;
 
           if (result.status === 'VALID') this.validCount++;
           else if (result.status === 'RISKY') this.riskyCount++;
-          else this.invalidCount++;
+          else if (result.status === 'INVALID') this.invalidCount++;
 
           this.completedCount++;
 
@@ -86,6 +101,10 @@ export class ValidationQueue {
 
           this.emitProgress(email, 'Completado');
         } catch (err: any) {
+          if (this.cancellationToken.isCancelled) {
+            break;
+          }
+
           const fallbackResult: EmailValidationResult = {
             id: `ev-${Date.now()}-${index}`,
             email,
@@ -123,23 +142,26 @@ export class ValidationQueue {
   }
 
   public pause(): void {
-    this.isPaused = true;
+    this.cancellationToken.pause();
+    this.emitProgress('', 'Validación en pausa');
   }
 
   public resume(): void {
-    this.isPaused = false;
+    this.cancellationToken.resume();
+    this.emitProgress('', 'Reanudando validación...');
   }
 
   public cancel(): void {
-    this.isCancelled = true;
+    this.cancellationToken.cancel();
     this.isRunning = false;
+    this.emitProgress('', 'Validación detenida por el usuario');
   }
 
   public getStatus(): { isRunning: boolean; isPaused: boolean; isCancelled: boolean } {
     return {
       isRunning: this.isRunning,
-      isPaused: this.isPaused,
-      isCancelled: this.isCancelled
+      isPaused: this.cancellationToken.isPaused,
+      isCancelled: this.cancellationToken.isCancelled
     };
   }
 
@@ -157,8 +179,8 @@ export class ValidationQueue {
       validCount: this.validCount,
       riskyCount: this.riskyCount,
       invalidCount: this.invalidCount,
-      isPaused: this.isPaused,
-      isCancelled: this.isCancelled
+      isPaused: this.cancellationToken.isPaused,
+      isCancelled: this.cancellationToken.isCancelled
     });
   }
 }

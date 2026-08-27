@@ -30,7 +30,11 @@ export class DnsResolverService {
   /**
    * Resuelve los registros DNS MX y A/AAAA de un dominio de forma real.
    */
-  public static async resolveDomainDns(domain: string, timeoutMs: number = 5000): Promise<DnsValidationResult> {
+  public static async resolveDomainDns(
+    domain: string,
+    timeoutMs: number = 5000,
+    signal?: AbortSignal
+  ): Promise<DnsValidationResult> {
     const cleanDomain = domain.toLowerCase().trim();
     if (!cleanDomain) {
       return {
@@ -41,6 +45,10 @@ export class DnsResolverService {
         nullMx: false,
         error: 'Dominio vacío'
       };
+    }
+
+    if (signal?.aborted) {
+      throw new Error('Operación DNS cancelada por el usuario');
     }
 
     // 1. Verificar caché en memoria
@@ -62,11 +70,14 @@ export class DnsResolverService {
 
     // 3. Resolver mediante DoH (DNS-over-HTTPS) real
     try {
-      const dohResult = await this.resolveViaDoH(cleanDomain, timeoutMs);
+      const dohResult = await this.resolveViaDoH(cleanDomain, timeoutMs, signal);
       dohResult.durationMs = Date.now() - startTime;
       cache.set(cleanDomain, dohResult);
       return dohResult;
     } catch (err: any) {
+      if (signal?.aborted) {
+        throw new Error('Operación DNS cancelada');
+      }
       const errorResult: DnsValidationResult = {
         domain: cleanDomain,
         domainExists: false,
@@ -109,27 +120,47 @@ export class DnsResolverService {
   /**
    * Consulta DoH para obtener registros MX y A con tolerancia a fallos entre proveedores.
    */
-  private static async resolveViaDoH(domain: string, timeoutMs: number): Promise<DnsValidationResult> {
+  private static async resolveViaDoH(
+    domain: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<DnsValidationResult> {
     let mxData: any = null;
     let lastError: Error | null = null;
 
     // Intentar con los proveedores DoH en orden de prioridad
     for (const provider of this.DOH_PROVIDERS) {
+      if (signal?.aborted) {
+        throw new Error('Operación DNS cancelada por el usuario');
+      }
+
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        // Si se pasa un signal externo, abortar el fetch cuando se active
+        const onExternalAbort = () => controller.abort();
+        if (signal) {
+          signal.addEventListener('abort', onExternalAbort, { once: true });
+        }
 
         const response = await fetch(provider.url(domain, 'MX'), {
           headers: provider.headers,
           signal: controller.signal
         });
         clearTimeout(timeoutId);
+        if (signal) {
+          signal.removeEventListener('abort', onExternalAbort);
+        }
 
         if (response.ok) {
           mxData = await response.json();
           break;
         }
       } catch (e: any) {
+        if (signal?.aborted) {
+          throw new Error('Operación DNS cancelada por el usuario');
+        }
         lastError = e;
         continue; // Intentar siguiente proveedor
       }
