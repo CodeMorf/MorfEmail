@@ -1,23 +1,16 @@
 /**
  * PublicDirectoryProvider - MorfEmail Discovery Provider
- * Descubridor de URLs corporativas y directorios comerciales públicos por país, región y ciudad.
+ * Descubre sitios web empresariales reales mediante el backend local de MorfEmail.
  */
 
 import { DiscoveryProvider, DiscoveryQuery, DiscoveryResult } from '../types';
 
 export class PublicDirectoryProvider implements DiscoveryProvider {
-  public name = 'MorfEmail Public B2B Directory Discovery';
+  public name = 'MorfEmail Real Public Business Discovery';
 
-  /**
-   * Ejecuta la consulta de descubrimiento y retorna una lista de sitios web y dominios para rastreo.
-   */
   public async search(query: DiscoveryQuery): Promise<DiscoveryResult[]> {
-    const results: DiscoveryResult[] = [];
-    const limit = query.limit || 20;
-
-    // Si se especificó un dominio particular
     if (query.targetDomain) {
-      const clean = query.targetDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+      const clean = query.targetDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
       return [
         {
           title: clean,
@@ -26,76 +19,35 @@ export class PublicDirectoryProvider implements DiscoveryProvider {
           category: query.category,
           city: query.city,
           country: query.country,
-          source: 'Dominio Específico Directo'
+          source: 'Dominio específico directo'
         }
       ];
     }
 
-    // Generador de semillas contextuales por país y categoría
-    const seeds = this.generateTargetSeeds(query.country, query.city, query.category, limit);
-    for (const seed of seeds) {
-      results.push({
-        title: seed.name,
-        websiteUrl: seed.url,
-        domain: seed.domain,
-        category: query.category,
-        city: query.city,
-        country: query.country,
-        estimatedAddress: seed.address,
-        estimatedPhone: seed.phone,
-        source: 'Public Web Registry & B2B Graph'
-      });
+    const response = await fetch('/api/discovery', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Discovery local respondió HTTP ${response.status}`);
     }
 
-    return results;
-  }
-
-  private generateTargetSeeds(
-    country: string,
-    city: string,
-    category: string,
-    count: number
-  ): Array<{ name: string; url: string; domain: string; address?: string; phone?: string }> {
-    const cleanCat = category.toLowerCase().trim();
-    const cleanCity = city || 'Distrito Nacional';
-    const cSlug = cleanCity.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    // Plantillas de dominios y empresas según el país y sector
-    const isRD = country.toLowerCase().includes('dominicana');
-    const isES = country.toLowerCase().includes('españa') || country.toLowerCase().includes('spain');
-    const isCO = country.toLowerCase().includes('colombia');
-
-    const tld = isRD ? '.com.do' : isES ? '.es' : isCO ? '.com.co' : '.com';
-    const phonePrefix = isRD ? '+1 809 ' : isES ? '+34 91 ' : isCO ? '+57 601 ' : '+1 305 ';
-
-    const seeds: Array<{ name: string; url: string; domain: string; address?: string; phone?: string }> = [];
-
-    const baseNames = [
-      'Grupo Comercial', 'Servicios Integrales', 'Centro Especializado', 'Estudio Corporativo',
-      'Soluciones Globales', 'Alianza Empresarial', 'Consultores Asociados', 'Desarrollos Prime',
-      'Innovación & Calidad', 'Elite Services', 'Master Pro', 'Distribuidora Central',
-      'Logística Avanzada', 'Boutique Corporativa', 'Agencia Capital', 'Red Profesional',
-      'Holding Empresarial', 'Corporativo San', 'Iniciativas Modernas', 'Servicios Premium'
-    ];
-
-    for (let i = 0; i < count; i++) {
-      const base = baseNames[i % baseNames.length];
-      const name = `${base} ${category} ${i + 1}`;
-      const slugName = name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14);
-      const domain = `${slugName}-${cSlug}${tld}`;
-      const url = `https://www.${domain}`;
-      const randomPhone = `${phonePrefix}${Math.floor(100 + Math.random() * 899)} ${Math.floor(1000 + Math.random() * 8999)}`;
-      const randomStreet = `Av. Principal #${i * 12 + 10}, ${cleanCity}`;
-
-      seeds.push({
-        name,
-        url,
-        domain,
-        address: randomStreet,
-        phone: randomPhone
-      });
-    }
-
-    return seeds;
+    const results = Array.isArray(payload?.results) ? payload.results : [];
+    return results.map((item: any) => ({
+      title: String(item.title || item.domain || 'Empresa'),
+      websiteUrl: String(item.websiteUrl || ''),
+      domain: String(item.domain || ''),
+      snippet: item.snippet ? String(item.snippet) : undefined,
+      category: String(item.category || query.category),
+      city: String(item.city || query.city || ''),
+      country: String(item.country || query.country),
+      estimatedAddress: item.estimatedAddress ? String(item.estimatedAddress) : undefined,
+      estimatedPhone: item.estimatedPhone ? String(item.estimatedPhone) : undefined,
+      estimatedEmail: item.estimatedEmail ? String(item.estimatedEmail) : undefined,
+      source: String(item.source || 'OpenStreetMap / Overpass')
+    })).filter((item: DiscoveryResult) => Boolean(item.websiteUrl && item.domain));
   }
 }
