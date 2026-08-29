@@ -1,15 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Sparkles, 
   Bell, 
   HelpCircle, 
   Minus, 
-  Square, 
+  Maximize2,
+  Minimize2,
+  Expand,
+  Shrink,
   X, 
   Bot,
   ExternalLink,
   Keyboard
 } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ActiveView, AppNotification, PolarBillingState } from '../types';
 import morfEmailMark from '../assets/branding/morfemail-mark.png';
 import type { CentralLicenseValidation } from '../services/billingService';
@@ -39,20 +43,101 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isNativeWindow, setIsNativeWindow] = useState(false);
 
-  const handleWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
-    if (action === 'minimize') {
-      addToast('Ventana minimizada', 'La aplicación continúa ejecutándose en la barra de tareas de Windows.', 'info');
-    } else if (action === 'maximize') {
-      setIsMaximized(!isMaximized);
-      addToast(isMaximized ? 'Ventana restaurada' : 'Ventana maximizada', undefined, 'info');
-    } else if (action === 'close') {
-      addToast('MorfEmail', 'Minimizado al área de notificación para no interrumpir búsquedas en segundo plano.', 'info');
+  useEffect(() => {
+    const nativeWindow = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    setIsNativeWindow(nativeWindow);
+
+    if (!nativeWindow) return;
+
+    const syncWindowState = async () => {
+      const currentWindow = getCurrentWindow();
+      const [maximized, fullscreen] = await Promise.all([
+        currentWindow.isMaximized(),
+        currentWindow.isFullscreen()
+      ]);
+      setIsMaximized(maximized);
+      setIsFullscreen(fullscreen);
+    };
+
+    void syncWindowState().catch(() => {
+      // The controls remain available even if the initial state cannot be read.
+    });
+  }, []);
+
+  const syncWindowState = async () => {
+    const currentWindow = getCurrentWindow();
+    const [maximized, fullscreen] = await Promise.all([
+      currentWindow.isMaximized(),
+      currentWindow.isFullscreen()
+    ]);
+    setIsMaximized(maximized);
+    setIsFullscreen(fullscreen);
+  };
+
+  const handleWindowAction = async (action: 'minimize' | 'maximize' | 'fullscreen' | 'close') => {
+    try {
+      if (action === 'fullscreen') {
+        if (isNativeWindow) {
+          const currentWindow = getCurrentWindow();
+          await currentWindow.setFullscreen(!isFullscreen);
+          await syncWindowState();
+        } else if (document.fullscreenElement) {
+          await document.exitFullscreen();
+          setIsFullscreen(false);
+        } else {
+          await document.documentElement.requestFullscreen();
+          setIsFullscreen(true);
+        }
+        return;
+      }
+
+      if (!isNativeWindow) return;
+
+      const currentWindow = getCurrentWindow();
+      if (action === 'minimize') {
+        await currentWindow.minimize();
+      } else if (action === 'maximize') {
+        await currentWindow.toggleMaximize();
+        await syncWindowState();
+      } else {
+        await currentWindow.close();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo cambiar el estado de la ventana.';
+      addToast('Control de ventana no disponible', message, 'error');
     }
   };
 
+  const handleTitleBarMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isNativeWindow || event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea')) return;
+
+    void getCurrentWindow().startDragging().catch((error) => {
+      const message = error instanceof Error ? error.message : 'No se pudo mover la ventana.';
+      addToast('Ventana no disponible', message, 'error');
+    });
+  };
+
+  const handleTitleBarDoubleClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isNativeWindow || event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea')) return;
+
+    void handleWindowAction('maximize');
+  };
+
   return (
-    <header className="h-10 bg-[#121417] text-slate-200 flex items-center justify-between px-3 border-b border-[#22262B] select-none text-xs z-40 relative">
+    <header
+      className="h-10 bg-[#121417] text-slate-200 flex items-center justify-between px-3 border-b border-[#22262B] select-none text-xs z-40 relative"
+      onMouseDown={handleTitleBarMouseDown}
+      onDoubleClick={handleTitleBarDoubleClick}
+    >
       {/* Left: Brand Identity */}
       <div className="flex items-center space-x-2.5">
         <div className="flex items-center space-x-1.5 cursor-pointer" onClick={() => setActiveView('dashboard')}>
@@ -91,8 +176,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <span className="text-slate-300 font-medium text-[11px]">Motor listo</span>
           </>
         )}
-        <span className="text-slate-600 text-[10px]">•</span>
-        <span className="text-[10px] text-slate-400 font-mono hidden md:inline">16 Hilos</span>
       </div>
 
       {/* Right Controls */}
@@ -208,30 +291,43 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           </span>
         </div>
 
-        {/* Windows Window Controls */}
-        <div className="flex items-center ml-2 border-l border-[#2B3037] pl-1">
-          <button
-            onClick={() => handleWindowAction('minimize')}
-            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262B] transition-colors rounded-sm"
-            title="Minimizar"
-          >
-            <Minus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleWindowAction('maximize')}
-            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262B] transition-colors rounded-sm"
-            title={isMaximized ? "Restaurar" : "Maximizar"}
-          >
-            <Square className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => handleWindowAction('close')}
-            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#E81123] transition-colors rounded-sm"
-            title="Cerrar"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* Controles nativos: solo se muestran dentro del instalador Tauri. */}
+        {isNativeWindow && (
+          <div className="flex items-center ml-2 border-l border-[#2B3037] pl-1">
+            <button
+              onClick={() => void handleWindowAction('minimize')}
+              className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262B] transition-colors rounded-sm"
+              title="Minimizar"
+              aria-label="Minimizar ventana"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => void handleWindowAction('maximize')}
+              className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262B] transition-colors rounded-sm"
+              title={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'}
+              aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'}
+            >
+              {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={() => void handleWindowAction('fullscreen')}
+              className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262B] transition-colors rounded-sm"
+              title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+              aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            >
+              {isFullscreen ? <Shrink className="w-3.5 h-3.5" /> : <Expand className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={() => void handleWindowAction('close')}
+              className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#E81123] transition-colors rounded-sm"
+              title="Cerrar aplicación"
+              aria-label="Cerrar aplicación"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

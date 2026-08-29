@@ -29,9 +29,7 @@ interface EmailVerifierViewProps {
 
 export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }) => {
   const [activeTab, setActiveTab] = useState<'paste' | 'file'>('paste');
-  const [pastedText, setPastedText] = useState(
-    "ventas@google.com\ncontacto@microsoft.com\ninfo@mailinator.com\nadministracion@dominio-inexistente-xyz9912.org\nsoporte@apple.com"
-  );
+  const [pastedText, setPastedText] = useState('');
   const [items, setItems] = useState<EmailVerificationItem[]>([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -378,7 +376,7 @@ export const EmailVerifierView: React.FC<EmailVerifierViewProps> = ({ addToast }
               rows={4}
               value={pastedText}
               onChange={(e) => setPastedText(e.target.value)}
-              placeholder="ventas@google.com&#10;contacto@microsoft.com&#10;info@tuempresa.com"
+              placeholder="ventas@tuempresa.com&#10;contacto@dominio.com&#10;info@empresa.org"
               className="w-full p-3 font-mono text-xs bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#F04438]"
             />
           </div>

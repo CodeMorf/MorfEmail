@@ -84,15 +84,6 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
     setCountrySearch('');
   };
 
-  // Estimate search time dynamically
-  const getTimeEstimate = (quantity: number) => {
-    if (quantity <= 1000) return '1–3 minutos';
-    if (quantity <= 5000) return '4–7 minutos';
-    if (quantity <= 10000) return '8–15 minutos';
-    if (quantity <= 50000) return '25–45 minutos';
-    return '1–2 horas';
-  };
-
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 overflow-y-auto pb-16">
       {/* Header */}
@@ -100,12 +91,9 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center space-x-2">
             <span>Encontrar nuevos clientes</span>
-            <span className="text-xs bg-red-100 text-[#F04438] px-2 py-0.5 rounded-full font-bold uppercase">
-              Motor v2.4 Global
-            </span>
           </h1>
           <p className="text-sm text-slate-600 mt-0.5">
-            Selecciona tu mercado y los datos que quieres encontrar en más de 240 países.
+            Selecciona el mercado y los datos que quieres buscar en las fuentes disponibles.
           </p>
         </div>
 
@@ -133,7 +121,7 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
               </h2>
             </div>
             <span className="text-xs text-slate-400 font-mono">
-              248 países disponibles
+              {ALL_COUNTRIES.length} países en el catálogo
             </span>
           </div>
 
@@ -302,7 +290,7 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
               </h2>
             </div>
             <span className="text-xs text-slate-400 font-medium hidden sm:inline">
-              5,000+ categorías disponibles
+              Categorías personalizables
             </span>
           </div>
 
@@ -531,8 +519,8 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
               <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center space-x-3 text-xs text-slate-600">
                 <Clock className="w-4 h-4 text-slate-400" />
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Estimación de tiempo</span>
-                  <span className="font-bold text-slate-900">{getTimeEstimate(config.quantity)}</span>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Duración real</span>
+                  <span className="font-bold text-slate-900">Se medirá al ejecutar</span>
                 </div>
               </div>
 

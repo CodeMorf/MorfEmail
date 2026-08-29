@@ -4,7 +4,7 @@
 
 El instalador NSIS x64 generado es:
 
-`src-tauri/target/release/bundle/nsis/MorfEmail_2.2.0_x64-setup.exe`
+`src-tauri/target/release/bundle/nsis/MorfEmail_2.2.1_x64-setup.exe`
 
 Incluye la interfaz MorfEmail, el motor Node local, SQLite, Playwright, JSDOM y Chromium. El cliente no necesita instalar Node ni otro servidor.
 

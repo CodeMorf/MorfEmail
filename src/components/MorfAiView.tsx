@@ -48,13 +48,28 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       sender: 'morf',
-      text: '¡Hola! Soy **Morf AI Studio**, tu copiloto inteligente de prospección B2B y enriquecimiento de leads.\n\nPuedo ayudarte a encontrar los nichos de mayor conversión, generar consultas optimizadas por ciudad o país, redactar secuencias de cold email de alta apertura y preparar guiones de WhatsApp comercial para tus prospectos extraídos.',
-      modelUsed: getActiveModelName(activeAiConfig)
+      text: 'Morf AI Studio todavía no está conectado a un proveedor de inteligencia artificial en esta instalación.\n\nConfigura una API válida en Configuración cuando el adaptador esté disponible. Hasta entonces no se mostrarán respuestas simuladas.',
     }
   ]);
-  const [isThinking, setIsThinking] = useState(false);
+
+  function isAiConfigured(cfg: AiConfig): boolean {
+    switch (cfg.activeProvider) {
+      case 'openai':
+        return Boolean(cfg.openai.apiKey.trim());
+      case 'gemini':
+        return Boolean(cfg.gemini.apiKey.trim());
+      case 'codemorf':
+        return Boolean(cfg.codemorf.apiKey.trim());
+      case 'custom':
+        return Boolean(cfg.custom.baseUrl.trim() && cfg.custom.apiKey.trim() && cfg.custom.model.trim());
+      default:
+        return false;
+    }
+  }
 
   function getActiveModelName(cfg: AiConfig): string {
+    if (!isAiConfigured(cfg)) return 'No configurado';
+
     switch (cfg.activeProvider) {
       case 'openai':
         return `OpenAI ${cfg.openai.model}`;
@@ -76,60 +91,16 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
     if (!text.trim()) return;
 
     const userMsg = { sender: 'user' as const, text };
-    setMessages((prev) => [...prev, userMsg]);
-    setInputPrompt('');
-    setIsThinking(true);
-
-    setTimeout(() => {
-      let botResponse = '';
-      let botAction = undefined;
-
-      const lower = text.toLowerCase();
-      if (lower.includes('rd') || lower.includes('dominicana') || lower.includes('restaurante')) {
-        botResponse = `🎯 **Estrategia Recomendada para Restaurantes en República Dominicana:**\n\n- La cobertura se determinará con la búsqueda real y las fuentes públicas disponibles.\n- Prioriza WhatsApp y teléfonos únicamente cuando estén publicados y normalizados.\n- **Keywords recomendadas:** *Restaurantes, Gastronomía, Mariscos, Parrilladas, Alta Cocina*.\n\nHe preparado una configuración inicial para que inicies la extracción:`;
-        botAction = {
-          label: '🔍 Aplicar y Buscar "Restaurantes Santo Domingo"',
-          config: {
-            country: 'República Dominicana',
-            countryCode: 'DO',
-            flag: '🇩🇴',
-            state: 'Santo Domingo',
-            city: 'Distrito Nacional',
-            businessType: 'Restaurantes',
-            quantity: 5000
-          }
-        };
-      } else if (lower.includes('abogados') || lower.includes('españa') || lower.includes('madrid')) {
-        botResponse = `⚖️ **Estrategia para Despachos de Abogados en España:**\n\n- La disponibilidad de emails se informa únicamente después de extraerlos de fuentes públicas.\n- Valida cada dirección antes de usarla en outreach.\n- **Sectores clave:** *Derecho Mercantil, Asesorías Fiscales, Laboral y Concursal en Madrid y Barcelona*.`;
-        botAction = {
-          label: '🔍 Aplicar y Buscar "Abogados Madrid"',
-          config: {
-            country: 'España',
-            countryCode: 'ES',
-            flag: '🇪🇸',
-            state: 'Madrid',
-            city: 'Madrid Centro',
-            businessType: 'Abogados y Despachos Legales',
-            quantity: 5000
-          }
-        };
-      } else if (lower.includes('email') || lower.includes('plantilla') || lower.includes('outreach')) {
-        botResponse = `📨 **Plantilla de Cold Email de Alta Conversión (B2B):**\n\n**Asunto:** Pregunta rápida sobre adquisición de clientes en {{Ciudad}}\n\nHola {{Nombre_Empresa}},\n\nEstuve revisando su sitio web y noté el gran trabajo que vienen realizando en el sector de {{Categoría}} en {{Ciudad}}.\n\nDesarrollamos soluciones especializadas para empresas de su sector que permiten aumentar el flujo de prospectos cualificados en un 35% durante los primeros 45 días.\n\n¿Tendrían disponibilidad este miércoles para una llamada ejecutiva de 5 minutos?\n\nUn cordial saludo,\nJhon D. — CodeMorf Leads`;
-      } else {
-        botResponse = `💡 **Análisis de ${currentModelLabel}:** He analizado tu solicitud para "${text}".\n\nTe recomiendo enfocar tu búsqueda en empresas con al menos sitio web activo y verificar siempre los registros MX antes de lanzar campañas masivas para proteger la reputación de tu dominio de envío.`;
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      {
+        sender: 'morf' as const,
+        text: 'No puedo procesar esta consulta todavía: no hay un adaptador de IA conectado. Configura el proveedor y vuelve a intentarlo cuando esta función esté habilitada.',
       }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: 'morf',
-          text: botResponse,
-          modelUsed: currentModelLabel,
-          action: botAction
-        }
-      ]);
-      setIsThinking(false);
-    }, 850);
+    ]);
+    setInputPrompt('');
+    addToast('Morf AI no disponible', 'La consulta se guardó en la conversación, pero todavía no se envió a ningún proveedor.', 'warning');
   };
 
   const copyText = (txt: string) => {
@@ -161,7 +132,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Inteligencia artificial multimodelo para prospección, análisis de mercados y redacción de campañas.
+              Herramientas de apoyo para prospección y campañas; el chat requiere un proveedor conectado.
             </p>
           </div>
         </div>
@@ -289,12 +260,6 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
               </div>
             ))}
 
-            {isThinking && (
-              <div className="flex items-center space-x-2 text-slate-400 text-xs italic">
-                <Bot className="w-4 h-4 animate-bounce text-[#F04438]" />
-                <span>Morf AI ({currentModelLabel}) está procesando solicitud...</span>
-              </div>
-            )}
           </div>
 
           {/* Quick prompt chips */}
@@ -324,7 +289,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
           <div className="p-3 border-t border-slate-200 flex items-center space-x-2 bg-white">
             <input
               type="text"
-              placeholder={`Pregunta a Morf AI (${currentModelLabel}) sobre mercados, sugerencias o emails...`}
+              placeholder={`Proveedor: ${currentModelLabel}. Escribe una consulta para comprobar el estado...`}
               value={inputPrompt}
               onChange={(e) => setInputPrompt(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -439,7 +404,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
             {
               title: '📧 Cold Email B2B — Propuesta Directa de Valor',
               channel: 'Email',
-              content: `Asunto: Solución para captación de clientes en {{Ciudad}}\n\nEstimado/a equipo de {{Empresa}},\n\nEstuvimos analizando su posicionamiento en el rubro de {{Categoría}} y detectamos una oportunidad para optimizar su embudo comercial en {{Ciudad}}.\n\nNuestras herramientas permiten automatizar la prospección reduciendo el costo por lead en un 40%.\n\n¿Tendrían 5 minutos esta semana para una breve demostración?\n\nAtentamente,\nJhon D.`
+              content: `Asunto: Consulta sobre {{Categoría}} en {{Ciudad}}\n\nEstimado/a equipo de {{Empresa}},\n\nEstamos contactando empresas del sector {{Categoría}} en {{Ciudad}} para conocer sus necesidades y explorar una posible colaboración.\n\n¿Tendrían disponibilidad esta semana para una breve conversación?\n\nAtentamente,\n{{Tu nombre}}`
             },
             {
               title: '💬 Mensaje Comercial de WhatsApp (Alta Tasa de Apertura)',

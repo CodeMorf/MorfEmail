@@ -98,7 +98,7 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
   const [state, setState] = useState('Santo Domingo');
   const [city, setCity] = useState('Distrito Nacional');
   const [interval, setInterval] = useState<ScheduleInterval>('daily');
-  const [targetListId, setTargetListId] = useState<string>(lists[0]?.id || 'list-1');
+  const [targetListId, setTargetListId] = useState<string>(lists[0]?.id || '');
   const [quantityPerRun, setQuantityPerRun] = useState<number>(500);
   const [autoVerifyEmails, setAutoVerifyEmails] = useState(true);
   const [autoDeduplicate, setAutoDeduplicate] = useState(true);
@@ -108,6 +108,7 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
   const [countryTab, setCountryTab] = useState<'popular' | 'all'>('popular');
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     if (editItem) {
@@ -133,7 +134,7 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
       setState('Santo Domingo');
       setCity('Distrito Nacional');
       setInterval('daily');
-      setTargetListId(lists[0]?.id || 'list-1');
+      setTargetListId(lists[0]?.id || '');
       setQuantityPerRun(500);
       setAutoVerifyEmails(true);
       setAutoDeduplicate(true);
@@ -172,7 +173,13 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
     e.preventDefault();
     const finalTitle = title.trim() || `${category} en ${city || state || country} (${interval})`;
     const targetList = lists.find((l) => l.id === targetListId);
-    const targetListName = targetList ? targetList.name : 'Lista Principal';
+    if (!targetList) {
+      setFormError('Crea o selecciona una lista antes de programar la búsqueda.');
+      return;
+    }
+
+    setFormError('');
+    const targetListName = targetList.name;
 
     onSave({
       id: editItem?.id,
@@ -401,7 +408,7 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center justify-between">
               <span>Frecuencia de Repetición Automática</span>
               <span className="text-[11px] text-[#F04438] font-semibold lowercase">
-                Motor programador v2.4
+                Programación local
               </span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -455,12 +462,16 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
                 onChange={(e) => setTargetListId(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 font-semibold focus:outline-none focus:border-[#F04438]"
               >
+                <option value="">Selecciona una lista...</option>
                 {lists.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name} ({l.leadCount.toLocaleString()} leads actuales)
                   </option>
                 ))}
               </select>
+              {lists.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-amber-700">No hay listas creadas. Ve a “Listas” y crea una antes de programar.</p>
+              )}
             </div>
 
             {/* Leads por ejecución */}
@@ -541,6 +552,12 @@ export const ScheduledSearchModal: React.FC<ScheduledSearchModalProps> = ({
               </label>
             </div>
           </div>
+
+          {formError && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800" role="alert">
+              {formError}
+            </p>
+          )}
 
           {/* Modal Actions */}
           <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200">

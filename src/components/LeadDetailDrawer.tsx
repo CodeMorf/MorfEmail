@@ -12,13 +12,10 @@ import {
   Bookmark,
   Copy,
   ExternalLink,
-  Bot,
   Sparkles,
-  Share2,
   FileText,
   Clock,
-  ShieldCheck,
-  Send
+  ShieldCheck
 } from 'lucide-react';
 import { Lead, LeadList } from '../types';
 
@@ -46,6 +43,8 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
 
   if (!lead) return null;
 
+  const isEmailVerified = lead.verified === 'verified';
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     addToast(`${label} copiado`, text, 'success');
@@ -54,13 +53,11 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
   const handleGeneratePitch = () => {
     setIsGeneratingPitch(true);
     setShowColdPitch(true);
-    setTimeout(() => {
-      setPitchText(
-        `Hola equipo de ${lead.companyName},\n\nEstuve revisando su presencia digital en ${lead.city} y me llamó la atención su enfoque en el sector ${lead.category}. Encontramos una oportunidad clave para aumentar su captación de clientes cualificados a través de automatizaciones B2B.\n\n¿Tendrían 5 minutos este jueves para una breve demo sin compromiso?\n\nSaludos cordiales,\nJhon D. — CodeMorf Growth`
-      );
-      setIsGeneratingPitch(false);
-      addToast('Pitch generado con Morf AI', 'Mensaje de outreach listo para enviar.', 'success');
-    }, 900);
+    setPitchText(
+      `Asunto: Consulta sobre ${lead.category || 'sus servicios'} en ${lead.city || lead.country}\n\nHola equipo de ${lead.companyName || 'la empresa'},\n\nMe gustaría conocer mejor sus servicios y conversar sobre si existe una oportunidad de colaboración.\n\n¿Podemos coordinar una breve conversación esta semana?\n\nSaludos,`
+    );
+    setIsGeneratingPitch(false);
+    addToast('Borrador creado', 'El texto se generó localmente con los datos visibles del lead; no se envió ningún correo.', 'info');
   };
 
   return (
@@ -96,16 +93,20 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
       <div className="p-6 space-y-6 overflow-y-auto flex-1 text-xs text-slate-700">
         
         {/* Verification Status Card */}
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+        <div className={`p-3.5 rounded-xl border flex items-center justify-between ${isEmailVerified ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
           <div className="flex items-center space-x-2.5">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+            {isEmailVerified ? <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />}
             <div>
-              <span className="font-bold text-emerald-900 block text-xs">Email Verificado & Activo</span>
-              <span className="text-[11px] text-emerald-700">Servidores MX saludables (Confianza: {lead.confidenceScore}%)</span>
+              <span className={`font-bold block text-xs ${isEmailVerified ? 'text-emerald-900' : 'text-amber-900'}`}>
+                {isEmailVerified ? 'Email verificado' : 'Email no verificado'}
+              </span>
+              <span className={`text-[11px] ${isEmailVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                Estado registrado: {lead.verified} · Confianza: {lead.confidenceScore}%
+              </span>
             </div>
           </div>
-          <span className="px-2 py-0.5 bg-emerald-600 text-white rounded font-mono font-bold text-[10px]">
-            98% SCORE
+          <span className={`px-2 py-0.5 text-white rounded font-mono font-bold text-[10px] ${isEmailVerified ? 'bg-emerald-600' : 'bg-amber-600'}`}>
+            {lead.confidenceScore}% SCORE
           </span>
         </div>
 
@@ -254,18 +255,18 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
         <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 text-white space-y-3 shadow-sm border border-slate-700">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <Bot className="w-4 h-4 text-[#F04438]" />
-              <span className="font-bold text-xs">Morf AI — Cold Outreach Pitch</span>
+              <FileText className="w-4 h-4 text-[#F04438]" />
+              <span className="font-bold text-xs">Borrador de outreach</span>
             </div>
             <span className="text-[9px] bg-[#F04438] text-white px-1.5 py-0.2 rounded font-bold uppercase">
-              AI Copilot
+              Local
             </span>
           </div>
 
           {!showColdPitch ? (
             <div>
               <p className="text-[11px] text-slate-300">
-                Genera al instante un correo en frío altamente personalizado según el nicho y ubicación de esta empresa.
+                Crea un borrador editable usando únicamente la información disponible de esta empresa.
               </p>
               <button
                 type="button"
@@ -274,7 +275,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 className="mt-2.5 w-full py-2 bg-[#F04438] hover:bg-[#D92D20] text-white rounded-lg font-bold text-xs flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{isGeneratingPitch ? 'Generando con Morf AI...' : 'Generar propuesta personalizada'}</span>
+                <span>{isGeneratingPitch ? 'Creando borrador...' : 'Crear borrador local'}</span>
               </button>
             </div>
           ) : (

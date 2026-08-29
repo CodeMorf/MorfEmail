@@ -240,7 +240,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               {stats.pagesAnalyzed.toLocaleString()}
             </span>
             <span className="text-[10px] text-emerald-600 font-medium font-mono">
-              Cheerio + Playwright
+              Medición del motor
             </span>
           </div>
 
@@ -253,7 +253,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
               {stats.businessesFound.toLocaleString()}
             </span>
-            <span className="text-[10px] text-slate-400">Deduplicadas 100%</span>
+            <span className="text-[10px] text-slate-400">Registros detectados por el motor</span>
           </div>
 
           {/* Emails Found */}
@@ -265,7 +265,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
             <span className="text-2xl font-extrabold font-mono text-slate-900 mt-2">
               {stats.emailsFound.toLocaleString()}
             </span>
-            <span className="text-[10px] text-emerald-600 font-medium">B2B verificados</span>
+            <span className="text-[10px] text-emerald-600 font-medium">Encontrados en fuentes consultadas</span>
           </div>
 
           {/* Phones Found */}

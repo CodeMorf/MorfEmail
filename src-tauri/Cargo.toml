@@ -1,6 +1,6 @@
 [package]
 name = "morfemail-desktop"
-version = "2.2.0"
+version = "2.2.1"
 description = "MorfEmail - Software de Descubrimiento y Organización B2B para Windows"
 authors = ["CodeMorf Labs <contact@codemorf.tech>"]
 license = "Proprietary"

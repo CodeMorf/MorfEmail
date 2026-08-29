@@ -545,7 +545,7 @@ export default function App() {
           )}
 
           {activeView === 'duplicates' && (
-            <DuplicatesView leads={leads} addToast={addToast} />
+            <DuplicatesView leads={leads} onDeleteLeads={handleDeleteLeads} addToast={addToast} />
           )}
 
           {activeView === 'morf-ai' && (

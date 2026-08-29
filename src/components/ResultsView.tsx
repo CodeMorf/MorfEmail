@@ -257,7 +257,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               }`}
             >
               <CheckCircle2 className="w-3 h-3" />
-              <span>Verificado 100%</span>
+              <span>Solo verificados</span>
             </button>
           </div>
 

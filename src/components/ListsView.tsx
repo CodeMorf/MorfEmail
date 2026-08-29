@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Bookmark,
   Plus,
@@ -35,14 +35,20 @@ export const ListsView: React.FC<ListsViewProps> = ({
   setActiveView,
   addToast
 }) => {
-  const [selectedListId, setSelectedListId] = useState<string>(lists[0]?.id || 'list-1');
+  const [selectedListId, setSelectedListId] = useState<string>(lists[0]?.id || '');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newListName, setNewListName] = useState('');
   const [newListDesc, setNewListDesc] = useState('');
   const [newListColor, setNewListColor] = useState('#F04438');
 
+  useEffect(() => {
+    if (!lists.some((list) => list.id === selectedListId)) {
+      setSelectedListId(lists[0]?.id || '');
+    }
+  }, [lists, selectedListId]);
+
   const currentList = lists.find(l => l.id === selectedListId) || lists[0];
-  const listLeads = leads.filter(l => l.listId === selectedListId);
+  const listLeads = leads.filter(l => l.listId === currentList?.id);
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();

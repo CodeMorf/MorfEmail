@@ -74,7 +74,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">Panel de Control</span>
             <span className="text-slate-500">•</span>
             <span className="flex items-center text-xs font-medium text-emerald-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1"></span> Base de datos sincronizada
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1"></span> Base de datos local
             </span>
           </div>
           <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-white">Buenos días</h1>
@@ -243,7 +243,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
                 <div>
                   <span className="text-xs font-bold tracking-wide text-slate-200">Morf AI Assistant</span>
-                  <p className="text-[10px] text-slate-400">By CodeMorf Technologies</p>
+              <p className="text-[10px] text-slate-400">Estado del conector</p>
                 </div>
               </div>
               <span className="text-[9px] bg-[#F04438] text-white px-1.5 py-0.5 rounded font-bold uppercase">Copilot</span>
@@ -254,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 💡 <strong className="text-white">Estado local:</strong> {leads.length ? `${leads.length.toLocaleString()} leads reales persistidos en SQLite.` : 'Todavía no hay leads reales persistidos en SQLite.'}
               </p>
               <p className="text-slate-400 text-[11px]">
-                ¿Deseas generar una campaña de cold outreach o una consulta optimizada para ese nicho?
+                Morf AI no está conectado en esta instalación. No se generarán recomendaciones automáticas hasta configurar un proveedor real.
               </p>
             </div>
           </div>
