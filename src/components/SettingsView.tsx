@@ -109,23 +109,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
-    setIsTestingProxy(true);
-    setTimeout(() => {
-      setIsTestingProxy(false);
-      const simulatedIp = '185.220.101.42';
-      const simulatedLatency = Math.floor(Math.random() * 45) + 38;
-      setProxyConfig((prev) => ({
-        ...prev,
-        status: 'connected',
-        lastTestedIp: simulatedIp,
-        latencyMs: simulatedLatency
-      }));
-      addToast(
-        'Proxy Conectado & Operativo',
-        `Túnel ${proxyConfig.protocol.toUpperCase()} verificado. IP Saliente: ${simulatedIp} (Frankfurt, DE) | Latencia: ${simulatedLatency}ms.`,
-        'success'
-      );
-    }, 950);
+    setIsTestingProxy(false);
+    setProxyConfig((prev) => ({ ...prev, status: 'idle', lastTestedIp: undefined, latencyMs: undefined }));
+    addToast('Proxy no verificado', 'La prueba real del túnel se habilitará cuando exista un adaptador de red configurado; no se generarán IP ni latencias ficticias.', 'warning');
   };
 
   const applyCustomPreset = (preset: 'groq' | 'openrouter' | 'deepseek' | 'together' | 'ollama') => {

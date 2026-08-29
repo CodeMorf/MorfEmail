@@ -53,6 +53,8 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
 
   // Suscribirse a eventos reales del CrawlerEngine
   useEffect(() => {
+    let hasStartedThisRun = false;
+    let completedHandled = false;
     // 1. Estadísticas
     const unsubStats = engine.onStatsUpdate((newStats) => {
       setStats(newStats);
@@ -74,14 +76,22 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
     // 4. Estado completado
     const unsubStatus = engine.onStatusChange((status) => {
       if (status === 'paused') {
+        hasStartedThisRun = true;
         setIsPaused(true);
       } else if (status === 'running') {
+        hasStartedThisRun = true;
         setIsPaused(false);
+      } else if (status === 'queued') {
+        hasStartedThisRun = true;
       } else if (status === 'completed') {
+        if (!hasStartedThisRun || completedHandled) return;
+        completedHandled = true;
         addToast('Búsqueda completada', `Se descubrieron ${engine.getStatistics().businessesFound} empresas en ${config.city || config.country}.`, 'success');
         onSearchComplete();
       } else if (status === 'cancelled') {
         addToast('Búsqueda detenida', 'El progreso se ha guardado localmente en SQLite.', 'info');
+      } else if (status === 'failed') {
+        addToast('Búsqueda fallida', 'El motor local no pudo completar la extracción. Revisa los errores del log.', 'error');
       }
     });
 
@@ -116,7 +126,9 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
     setActiveView('dashboard');
   };
 
-  const progressPercent = Math.min(100, Math.round((stats.businessesFound / targetCount) * 100)) || 2;
+  const progressPercent = targetCount > 0
+    ? Math.min(100, Math.round((stats.businessesFound / targetCount) * 100))
+    : 0;
 
   // Formato mm:ss para tiempo transcurrido
   const formatTime = (seconds: number) => {
@@ -287,7 +299,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
               <path
                 className="text-[#F04438]"
-                strokeDasharray={`${Math.min(100, Math.max(10, stats.speedPagesPerMin))}, 100`}
+                strokeDasharray={`${Math.min(100, Math.max(0, stats.speedPagesPerMin))}, 100`}
                 strokeWidth="3.5"
                 strokeLinecap="round"
                 stroke="currentColor"
@@ -296,7 +308,7 @@ export const SearchProgressView: React.FC<SearchProgressViewProps> = ({
               />
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-xl font-black font-mono text-slate-900">{stats.speedPagesPerMin || 72}</span>
+              <span className="text-xl font-black font-mono text-slate-900">{stats.speedPagesPerMin}</span>
               <span className="text-[9px] text-slate-400 font-medium">pág/min</span>
             </div>
           </div>

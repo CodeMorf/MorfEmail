@@ -13,11 +13,8 @@ export interface ExtractedAddress {
 }
 
 export class AddressExtractor {
-  public static extract(html: string, fallbackCity?: string, fallbackCountry?: string): ExtractedAddress {
-    const addr: ExtractedAddress = {
-      city: fallbackCity,
-      country: fallbackCountry
-    };
+  public static extract(html: string, _fallbackCity?: string, _fallbackCountry?: string): ExtractedAddress {
+    const addr: ExtractedAddress = {};
 
     if (!html) return addr;
 

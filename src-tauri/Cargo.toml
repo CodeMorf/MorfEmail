@@ -1,23 +1,25 @@
 [package]
 name = "morfemail-desktop"
-version = "2.0.0"
+version = "2.2.0"
 description = "MorfEmail - Software de Descubrimiento y Organización B2B para Windows"
 authors = ["CodeMorf Labs <contact@codemorf.tech>"]
 license = "Proprietary"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2.0.0", features = [] }
+tauri-build = { version = "2.5.2", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0", features = [] }
-tauri-plugin-shell = "2.0.0"
-tauri-plugin-fs = "2.0.0"
-tauri-plugin-dialog = "2.0.0"
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-shell = "2.3.5"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-notification = "2.3.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full", "net"] }
 hickory-resolver = "0.24"
+sha2 = "0.10"
 
 [features]
 default = ["custom-protocol"]

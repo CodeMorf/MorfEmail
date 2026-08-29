@@ -16,12 +16,14 @@ import {
   ChevronRight,
   Calendar
 } from 'lucide-react';
-import { ActiveView, SearchHistoryItem, ScheduledSearch, LeadList } from '../types';
+import { ActiveView, SearchHistoryItem, ScheduledSearch, Lead, LeadList } from '../types';
 import { ScheduledSearchesSection } from './ScheduledSearchesSection';
+import morfEmailBanner from '../assets/branding/morfemail-banner.png';
 
 interface DashboardViewProps {
   setActiveView: (view: ActiveView) => void;
   history: SearchHistoryItem[];
+  leads: Lead[];
   scheduledSearches: ScheduledSearch[];
   lists: LeadList[];
   onRepeatSearch: (item: SearchHistoryItem) => void;
@@ -36,6 +38,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   setActiveView,
   history,
+  leads,
   scheduledSearches,
   lists,
   onRepeatSearch,
@@ -46,33 +49,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onDeleteScheduledSearch,
   onRunScheduledSearchNow
 }) => {
-  const chartDays = [
-    { day: 'Jue 20', count: 1820, height: '48%', label: '1,820' },
-    { day: 'Vie 21', count: 2450, height: '65%', label: '2,450' },
-    { day: 'Sáb 22', count: 980, height: '26%', label: '980' },
-    { day: 'Dom 23', count: 640, height: '18%', label: '640' },
-    { day: 'Lun 24', count: 3120, height: '82%', label: '3,120' },
-    { day: 'Mar 25', count: 2890, height: '76%', label: '2,890' },
-    { day: 'Mié 26', count: 3820, height: '100%', label: '3,820' }
-  ];
+  const emailCount = leads.filter((lead) => Boolean(lead.email)).length;
+  const phoneCount = leads.filter((lead) => Boolean(lead.phone)).length;
+  const verifiedCount = leads.filter((lead) => lead.verified === 'verified').length;
+  const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'short', day: 'numeric' });
+  const chartDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    const count = leads.filter((lead) => {
+      const extracted = new Date(lead.extractedAt);
+      return extracted >= date && extracted < new Date(date.getTime() + 24 * 60 * 60 * 1000);
+    }).length;
+    return { day: dayFormatter.format(date), count, height: `${leads.length ? Math.max(4, Math.round((count / Math.max(1, leads.length)) * 100)) : 0}%`, label: count.toLocaleString() };
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto overflow-y-auto">
       {/* Top Welcome Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div>
+      <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden rounded-xl border border-slate-800 bg-[#101827] p-5 text-white shadow-sm">
+        <img src={morfEmailBanner} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-55" />
+        <div className="relative z-10">
           <div className="flex items-center space-x-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Panel de Control</span>
-            <span className="text-slate-300">•</span>
-            <span className="text-xs text-emerald-600 font-medium flex items-center">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">Panel de Control</span>
+            <span className="text-slate-500">•</span>
+            <span className="flex items-center text-xs font-medium text-emerald-300">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1"></span> Base de datos sincronizada
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-0.5">Buenos días</h1>
-          <p className="text-sm text-slate-600">Encuentra nuevos clientes potenciales y extrae contactos empresariales públicos en segundos.</p>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-white">Buenos días</h1>
+          <p className="text-sm text-slate-300">Encuentra nuevos clientes potenciales y extrae contactos empresariales públicos en segundos.</p>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="relative z-10 flex items-center space-x-3">
           <button
             onClick={() => setActiveView('morf-ai')}
             className="flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-all border border-slate-300 cursor-pointer"
@@ -102,10 +111,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">18,420</div>
+            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">{leads.length.toLocaleString()}</div>
             <div className="flex items-center space-x-1 text-xs text-emerald-600 font-medium mt-1">
               <TrendingUp className="w-3.5 h-3.5" />
-              <span>+1,284 esta semana</span>
+              <span>{history.length} búsquedas registradas</span>
             </div>
           </div>
         </div>
@@ -119,9 +128,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">13,845</div>
+            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">{emailCount.toLocaleString()}</div>
             <div className="text-xs text-slate-500 mt-1 flex items-center justify-between">
-              <span className="font-medium text-blue-600">75.1% encontrados</span>
+              <span className="font-medium text-blue-600">{leads.length ? Math.round((emailCount / leads.length) * 100) : 0}% encontrados</span>
               <span className="text-[11px] text-slate-400">Directos</span>
             </div>
           </div>
@@ -136,9 +145,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">15,291</div>
+            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">{phoneCount.toLocaleString()}</div>
             <div className="text-xs text-slate-500 mt-1 flex items-center justify-between">
-              <span className="font-medium text-amber-600">83.0% encontrados</span>
+              <span className="font-medium text-amber-600">{leads.length ? Math.round((phoneCount / leads.length) * 100) : 0}% encontrados</span>
               <span className="text-[11px] text-slate-400">WhatsApp inc.</span>
             </div>
           </div>
@@ -153,9 +162,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">12,903</div>
+            <div className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">{verifiedCount.toLocaleString()}</div>
             <div className="text-xs text-slate-500 mt-1 flex items-center justify-between">
-              <span className="font-medium text-emerald-600">93.2% válidos</span>
+              <span className="font-medium text-emerald-600">{leads.length ? Math.round((verifiedCount / leads.length) * 100) : 0}% válidos</span>
               <span className="text-[11px] text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded font-semibold">MX OK</span>
             </div>
           </div>
@@ -183,7 +192,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <p className="text-xs text-slate-500">Volumen de extracción diaria y rendimiento del motor</p>
             </div>
             <div className="flex items-center space-x-2 text-xs">
-              <span className="px-2.5 py-1 rounded bg-slate-100 font-medium text-slate-600">Total: 15,720 leads</span>
+              <span className="px-2.5 py-1 rounded bg-slate-100 font-medium text-slate-600">Total: {leads.length.toLocaleString()} leads</span>
             </div>
           </div>
 
@@ -220,7 +229,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span>Días anteriores</span>
               </div>
             </div>
-            <span className="text-slate-400 font-mono text-[11px]">Promedio: 2,245 leads/día</span>
+            <span className="text-slate-400 font-mono text-[11px]">Promedio: {Math.round(leads.length / 7).toLocaleString()} leads/día</span>
           </div>
         </div>
 
@@ -242,7 +251,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="p-3 bg-[#22262B] rounded-lg border border-slate-700 text-xs space-y-2">
               <p className="text-slate-200 leading-relaxed">
-                💡 <strong className="text-white">Oportunidad detectada:</strong> El sector <span className="text-amber-300">Restaurantes en República Dominicana</span> tiene una tasa de verificación del 94.2% con WhatsApp activo en el 82% de los leads.
+                💡 <strong className="text-white">Estado local:</strong> {leads.length ? `${leads.length.toLocaleString()} leads reales persistidos en SQLite.` : 'Todavía no hay leads reales persistidos en SQLite.'}
               </p>
               <p className="text-slate-400 text-[11px]">
                 ¿Deseas generar una campaña de cold outreach o una consulta optimizada para ese nicho?

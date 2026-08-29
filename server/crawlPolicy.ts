@@ -24,15 +24,18 @@ export async function isAllowedByRobots(url: URL, userAgent: string): Promise<bo
   const robotsUrl = new URL('/robots.txt', origin).toString();
   try {
     const response = await fetch(robotsUrl, {
-      headers: { 'User-Agent': userAgent, Accept: 'text/plain,*/*;q=0.1' }
+      headers: { 'User-Agent': userAgent, Accept: 'text/plain,*/*;q=0.1' },
+      signal: AbortSignal.timeout(5_000)
     });
+    if (response.status === 401 || response.status === 403) return false;
     const text = response.ok ? await response.text() : '';
     const parser = robotsParser(robotsUrl, text);
     robotsCache.set(origin, { expiresAt: Date.now() + 60 * 60 * 1000, parser });
     return parser.isAllowed(url.toString(), userAgent) !== false;
   } catch {
-    // Si robots.txt no puede consultarse, no fingimos permiso explícito;
-    // para desarrollo local permitimos la URL y seguimos aplicando rate limits.
+    // Un fallo de red no demuestra que la URL esté prohibida. Se conserva el
+    // acceso para no convertir una indisponibilidad temporal de robots.txt en
+    // datos ficticios; la política de rate-limit sigue vigente.
     return true;
   }
 }

@@ -42,7 +42,7 @@ export class SearchService {
       concurrency?: number;
     }
   ): Promise<string> {
-    const searchId = `srch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const searchId = `srch-${Date.now()}-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`;
     this.currentSearchId = searchId;
 
     const query = QueryBuilder.buildQuery({
@@ -78,7 +78,13 @@ export class SearchService {
     await this.engine.start(query, {
       mode: options?.mode || 'auto',
       headless: options?.headless ?? true,
-      maxConcurrency: options?.concurrency || 8
+      maxConcurrency: options?.concurrency || 8,
+      searchId,
+      browserConcurrency: 2,
+      respectRobotsTxt: true,
+      crawlDepth: 2,
+      maxRetries: 2,
+      rateLimitPerDomainMs: 800
     });
 
     return searchId;

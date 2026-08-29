@@ -29,6 +29,13 @@ interface MorfAiViewProps {
   addToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
 
+type ChatMessage = {
+  sender: 'user' | 'morf';
+  text: string;
+  modelUsed?: string;
+  action?: { label: string; config?: Partial<SearchConfig> };
+};
+
 export const MorfAiView: React.FC<MorfAiViewProps> = ({
   activeAiConfig = INITIAL_AI_CONFIG,
   activeProxyConfig = INITIAL_PROXY_CONFIG,
@@ -38,12 +45,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'queries' | 'outreach'>('chat');
   const [inputPrompt, setInputPrompt] = useState('');
-  const [messages, setMessages] = useState<{
-    sender: 'user' | 'morf';
-    text: string;
-    modelUsed?: string;
-    action?: { label: string; config?: Partial<SearchConfig> };
-  }>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       sender: 'morf',
       text: '¡Hola! Soy **Morf AI Studio**, tu copiloto inteligente de prospección B2B y enriquecimiento de leads.\n\nPuedo ayudarte a encontrar los nichos de mayor conversión, generar consultas optimizadas por ciudad o país, redactar secuencias de cold email de alta apertura y preparar guiones de WhatsApp comercial para tus prospectos extraídos.',
@@ -84,7 +86,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
 
       const lower = text.toLowerCase();
       if (lower.includes('rd') || lower.includes('dominicana') || lower.includes('restaurante')) {
-        botResponse = `🎯 **Estrategia Recomendada para Restaurantes en República Dominicana:**\n\n- **Volumen estimado:** 2,300+ establecimientos registrados en Santo Domingo y Santiago.\n- **Canales con mayor respuesta:** WhatsApp comercial (82% de disponibilidad) y llamadas directas en horario de 10:00 a 12:00.\n- **Keywords recomendadas:** *Restaurantes, Gastronomía, Mariscos, Parrilladas, Alta Cocina*.\n\nHe preparado la configuración óptima para que inicies la extracción ahora:`;
+        botResponse = `🎯 **Estrategia Recomendada para Restaurantes en República Dominicana:**\n\n- La cobertura se determinará con la búsqueda real y las fuentes públicas disponibles.\n- Prioriza WhatsApp y teléfonos únicamente cuando estén publicados y normalizados.\n- **Keywords recomendadas:** *Restaurantes, Gastronomía, Mariscos, Parrilladas, Alta Cocina*.\n\nHe preparado una configuración inicial para que inicies la extracción:`;
         botAction = {
           label: '🔍 Aplicar y Buscar "Restaurantes Santo Domingo"',
           config: {
@@ -98,7 +100,7 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
           }
         };
       } else if (lower.includes('abogados') || lower.includes('españa') || lower.includes('madrid')) {
-        botResponse = `⚖️ **Estrategia para Despachos de Abogados en España:**\n\n- **Tasa de verificación MX:** 97.4% (muy alta entregabilidad en Google Workspace y Microsoft 365).\n- **Enfoque de outreach:** Emails altamente formales dirigidos al socio director o área de nuevos negocios.\n- **Sectores clave:** *Derecho Mercantil, Asesorías Fiscales, Laboral y Concursal en Madrid y Barcelona*.`;
+        botResponse = `⚖️ **Estrategia para Despachos de Abogados en España:**\n\n- La disponibilidad de emails se informa únicamente después de extraerlos de fuentes públicas.\n- Valida cada dirección antes de usarla en outreach.\n- **Sectores clave:** *Derecho Mercantil, Asesorías Fiscales, Laboral y Concursal en Madrid y Barcelona*.`;
         botAction = {
           label: '🔍 Aplicar y Buscar "Abogados Madrid"',
           config: {
@@ -345,8 +347,8 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
           {[
             {
               title: '🇩🇴 Gastronomía & Restaurantes RD',
-              leads: '2,300+ leads',
-              conv: '94% Verificados',
+              leads: 'Se calcula al ejecutar',
+              conv: 'Sin verificar',
               desc: 'Restaurantes, franquicias y centros gastronómicos en Santo Domingo, Santiago y Punta Cana.',
               config: {
                 country: 'República Dominicana',
@@ -360,8 +362,8 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
             },
             {
               title: '🇪🇸 Asesorías & Bufetes Madrid',
-              leads: '1,500+ leads',
-              conv: '98% Verificados',
+              leads: 'Se calcula al ejecutar',
+              conv: 'Sin verificar',
               desc: 'Despachos jurídicos, tributarios y contables en la Comunidad de Madrid.',
               config: {
                 country: 'España',
@@ -375,8 +377,8 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
             },
             {
               title: '🇺🇸 Boutique Hotels & Resorts Florida',
-              leads: '3,800+ leads',
-              conv: '91% Verificados',
+              leads: 'Se calcula al ejecutar',
+              conv: 'Sin verificar',
               desc: 'Hotelería, alojamiento vacacional y suites en Miami Beach y Orlando.',
               config: {
                 country: 'Estados Unidos',
@@ -390,8 +392,8 @@ export const MorfAiView: React.FC<MorfAiViewProps> = ({
             },
             {
               title: '🇲🇽 Clínicas Dentales CDMX Polanco',
-              leads: '1,800+ leads',
-              conv: '96% Verificados',
+              leads: 'Se calcula al ejecutar',
+              conv: 'Sin verificar',
               desc: 'Odontólogos, clínicas estéticas y salud dental en zonas corporativas.',
               config: {
                 country: 'México',

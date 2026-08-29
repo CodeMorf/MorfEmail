@@ -511,16 +511,16 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
           <div className="space-y-3 pt-1">
             <input
               type="range"
-              min="100"
+              min="20"
               max="50000"
-              step="500"
+              step="20"
               value={config.quantity}
               onChange={(e) => setConfig({ ...config, quantity: Number(e.target.value) })}
               className="w-full accent-[#F04438] cursor-pointer h-2 bg-slate-200 rounded-lg appearance-none"
             />
             
             <div className="flex justify-between text-[11px] font-mono text-slate-400">
-              <span>100 leads</span>
+              <span>20 leads</span>
               <span>10,000 leads</span>
               <span>25,000 leads</span>
               <span>50,000 leads</span>
@@ -539,8 +539,8 @@ export const NewSearchView: React.FC<NewSearchViewProps> = ({
               <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center space-x-3 text-xs text-slate-600">
                 <Coins className="w-4 h-4 text-[#F04438]" />
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Consumo estimado</span>
-                  <span className="font-bold text-slate-900">Usará hasta {config.quantity.toLocaleString()} créditos de tu plan PRO.</span>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Registros a procesar</span>
+                  <span className="font-bold text-slate-900">Se procesarán hasta {config.quantity.toLocaleString()} registros reales.</span>
                 </div>
               </div>
             </div>

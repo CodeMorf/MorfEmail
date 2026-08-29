@@ -87,13 +87,7 @@ export class BusinessExtractor {
       return h1;
     }
 
-    if (domain) {
-      // Fallback a capitalización del dominio (ej: dentalstudio.com -> Dental Studio)
-      const clean = domain.replace(/^www\./, '').split('.')[0];
-      return clean.charAt(0).toUpperCase() + clean.slice(1);
-    }
-
-    return 'Empresa Desconocida';
+    return '';
   }
 
   private static isGenericWord(word: string): boolean {

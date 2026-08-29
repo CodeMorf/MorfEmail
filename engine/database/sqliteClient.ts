@@ -1,150 +1,91 @@
 /**
- * SqliteClient - MorfEmail Local Storage & Database Adapter
- * Administra el almacenamiento persistente de prospectos, colas de rastreo y configuraciones locales.
+ * Cliente del API SQLite local.
+ *
+ * El navegador nunca importa better-sqlite3 directamente: todas las
+ * operaciones pasan por server/index.ts, que ejecuta las consultas
+ * parametrizadas contra data/morfemail.db.
  */
 
-import { DbLead, DbSearch, DbCrawlQueueItem, DbExportRecord } from './models';
-import { NormalizedLead } from '../types';
+import type { DbCrawlQueueItem, DbExportRecord, DbSearch } from './models';
+import type { NormalizedLead } from '../types';
+import { localApiUrl } from '../../src/services/localApi';
 
-const STORAGE_KEYS = {
-  LEADS: 'morfemail_sqlite_leads',
-  SEARCHES: 'morfemail_sqlite_searches',
-  QUEUE: 'morfemail_sqlite_queue',
-  EXPORTS: 'morfemail_sqlite_exports',
-  SETTINGS: 'morfemail_sqlite_settings'
-};
+interface ApiResponse<T> { leads?: T; searches?: T; error?: string; }
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(localApiUrl(path), { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const payload = (await response.json().catch(() => ({}))) as ApiResponse<T>;
+  if (!response.ok) throw new Error(payload.error || `API SQLite respondió HTTP ${response.status}`);
+  return payload as T;
+}
 
 export class SqliteClient {
   private static instance: SqliteClient;
 
   public static getInstance(): SqliteClient {
-    if (!this.instance) {
-      this.instance = new SqliteClient();
-    }
+    if (!this.instance) this.instance = new SqliteClient();
     return this.instance;
   }
 
-  // --- LEADS ---
-
   public async insertLead(lead: NormalizedLead, searchId?: string): Promise<void> {
-    const leads = this.getAllLeads();
-    const existingIndex = leads.findIndex((l) => l.domain === lead.domain || (lead.email && l.email === lead.email));
-
-    if (existingIndex >= 0) {
-      // Actualizar existente con nueva información descubierta
-      leads[existingIndex] = {
-        ...leads[existingIndex],
-        ...lead,
-        updatedAt: new Date().toISOString()
-      };
-    } else {
-      leads.unshift(lead);
-    }
-
-    this.saveToStorage(STORAGE_KEYS.LEADS, leads);
+    await request('/api/leads', { method: 'POST', body: JSON.stringify({ ...lead, searchId }) });
   }
 
-  public async insertLeadsBatch(newLeads: NormalizedLead[]): Promise<number> {
-    const leads = this.getAllLeads();
+  public async insertLeadsBatch(newLeads: NormalizedLead[], searchId?: string): Promise<number> {
     let added = 0;
-
     for (const lead of newLeads) {
-      const exists = leads.some((l) => l.domain === lead.domain || (lead.email && l.email === lead.email));
-      if (!exists) {
-        leads.unshift(lead);
-        added++;
-      }
+      await this.insertLead(lead, searchId);
+      added++;
     }
-
-    this.saveToStorage(STORAGE_KEYS.LEADS, leads);
     return added;
   }
 
-  public getAllLeads(): NormalizedLead[] {
-    return this.loadFromStorage<NormalizedLead[]>(STORAGE_KEYS.LEADS, []);
+  public async getAllLeads(): Promise<NormalizedLead[]> {
+    const payload = await request<{ leads: NormalizedLead[] }>('/api/leads');
+    return Array.isArray(payload.leads) ? payload.leads : [];
   }
 
-  public getLeadsBySearchId(searchId: string): NormalizedLead[] {
-    const all = this.getAllLeads();
-    return all.filter((l: any) => l.searchId === searchId);
+  public async getLeadsBySearchId(searchId: string): Promise<NormalizedLead[]> {
+    const payload = await request<{ leads: NormalizedLead[] }>(`/api/leads?searchId=${encodeURIComponent(searchId)}`);
+    return Array.isArray(payload.leads) ? payload.leads : [];
   }
 
-  public deleteLead(leadId: string): void {
-    const leads = this.getAllLeads().filter((l) => l.id !== leadId);
-    this.saveToStorage(STORAGE_KEYS.LEADS, leads);
+  public async deleteLead(leadId: string): Promise<void> {
+    await request(`/api/leads/${encodeURIComponent(leadId)}`, { method: 'DELETE' });
   }
-
-  // --- SEARCHES ---
 
   public async saveSearch(search: DbSearch): Promise<void> {
-    const searches = this.getAllSearches();
-    const index = searches.findIndex((s) => s.id === search.id);
-    if (index >= 0) {
-      searches[index] = { ...searches[index], ...search, updated_at: new Date().toISOString() };
-    } else {
-      searches.unshift(search);
-    }
-    this.saveToStorage(STORAGE_KEYS.SEARCHES, searches);
+    await request('/api/searches', { method: 'POST', body: JSON.stringify(search) });
   }
 
-  public getAllSearches(): DbSearch[] {
-    return this.loadFromStorage<DbSearch[]>(STORAGE_KEYS.SEARCHES, []);
+  public async updateSearch(id: string, patch: Partial<DbSearch>): Promise<void> {
+    await request(`/api/searches/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
-  // --- UNFINISHED SEARCH / QUEUE PERSISTENCE ---
+  public async getAllSearches(): Promise<DbSearch[]> {
+    const payload = await request<{ searches: DbSearch[] }>('/api/searches');
+    return Array.isArray(payload.searches) ? payload.searches : [];
+  }
 
-  public async saveQueueSnapshot(searchId: string, items: DbCrawlQueueItem[]): Promise<void> {
-    this.saveToStorage(`${STORAGE_KEYS.QUEUE}_${searchId}`, items);
+  public async saveQueueSnapshot(_searchId: string, _items: DbCrawlQueueItem[]): Promise<void> {
+    // La cola real y sus checkpoints los administra Crawlee en el backend.
   }
 
   public async getUnfinishedSearch(): Promise<{ searchId: string; items: DbCrawlQueueItem[] } | null> {
-    const searches = this.getAllSearches();
-    const unfinished = searches.find((s) => s.status === 'running' || s.status === 'paused');
-    if (!unfinished) return null;
-
-    const items = this.loadFromStorage<DbCrawlQueueItem[]>(`${STORAGE_KEYS.QUEUE}_${unfinished.id}`, []);
-    return {
-      searchId: unfinished.id,
-      items
-    };
+    const searches = await this.getAllSearches();
+    const unfinished = searches.find((search) => search.status === 'running' || search.status === 'paused');
+    return unfinished ? { searchId: unfinished.id, items: [] } : null;
   }
 
-  public async clearQueue(searchId: string): Promise<void> {
-    try {
-      localStorage.removeItem(`${STORAGE_KEYS.QUEUE}_${searchId}`);
-    } catch {
-      // Ignorar
-    }
+  public async clearQueue(_searchId: string): Promise<void> {
+    // Crawlee marca y conserva sus solicitudes en el almacenamiento local.
   }
 
-  // --- EXPORTS ---
-
-  public async recordExport(rec: DbExportRecord): Promise<void> {
-    const exports = this.getAllExports();
-    exports.unshift(rec);
-    this.saveToStorage(STORAGE_KEYS.EXPORTS, exports);
+  public async recordExport(record: DbExportRecord): Promise<void> {
+    await request('/api/exports', { method: 'POST', body: JSON.stringify(record) });
   }
 
-  public getAllExports(): DbExportRecord[] {
-    return this.loadFromStorage<DbExportRecord[]>(STORAGE_KEYS.EXPORTS, []);
-  }
-
-  // --- HELPERS ---
-
-  private loadFromStorage<T>(key: string, fallback: T): T {
-    try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  private saveToStorage(key: string, data: any): void {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (e) {
-      console.warn('Storage quota limit reached in sqlite adapter:', e);
-    }
+  public async getAllExports(): Promise<DbExportRecord[]> {
+    return [];
   }
 }

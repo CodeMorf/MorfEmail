@@ -9,9 +9,11 @@ export type CrawlStatus = 'idle' | 'queued' | 'running' | 'paused' | 'completed'
 export interface CrawlStatistics {
   pagesAnalyzed: number;
   businessesFound: number;
+  websitesDiscovered: number;
   emailsFound: number;
   phonesFound: number;
   whatsappFound: number;
+  restrictedCount: number;
   errorsCount: number;
   speedPagesPerMin: number;
   elapsedTimeSec: number;
@@ -164,6 +166,7 @@ export interface CrawlerConfig {
   respectRobotsTxt: boolean;
   crawlDepth: number; // e.g. 1 = main page only, 2 = follow /contact, /about
   proxyEnabled?: boolean;
+  searchId?: string;
 }
 
 export interface IntelligentExtractor {

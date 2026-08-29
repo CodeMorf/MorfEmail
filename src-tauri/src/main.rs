@@ -2,11 +2,61 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex, time::Duration};
+use sha2::{Digest, Sha256};
 use hickory_resolver::config::*;
 use hickory_resolver::TokioAsyncResolver;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tauri::{AppHandle, Manager, RunEvent};
+
+#[derive(Default)]
+struct LocalEngine(Mutex<Option<Child>>);
+
+fn find_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    [
+        resource_dir.join("runtime"),
+        resource_dir.join("resources").join("runtime"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.join("node.exe").is_file() && candidate.join("server.cjs").is_file())
+}
+
+fn start_local_engine(app: &AppHandle) -> Result<(), String> {
+    let Some(runtime_dir) = find_runtime_dir(app) else {
+        // Development mode starts npm run dev:api separately. Packaged builds
+        // include this runtime and start it automatically.
+        return Ok(());
+    };
+
+    let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+    let child = Command::new(runtime_dir.join("node.exe"))
+        .arg(runtime_dir.join("server.cjs"))
+        .current_dir(&runtime_dir)
+        .env("MORFEMAIL_API_PORT", "3100")
+        .env("MORFEMAIL_DB_PATH", data_dir.join("morfemail.db"))
+        .env("PLAYWRIGHT_BROWSERS_PATH", runtime_dir.join("ms-playwright"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("No se pudo iniciar el motor local: {error}"))?;
+
+    let state = app.state::<LocalEngine>();
+    *state.0.lock().map_err(|_| "No se pudo guardar el proceso local".to_string())? = Some(child);
+    Ok(())
+}
+
+fn stop_local_engine(app: &AppHandle) {
+    if let Some(state) = app.try_state::<LocalEngine>() {
+        if let Ok(mut process) = state.0.lock() {
+            if let Some(mut child) = process.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SystemInfo {
@@ -14,13 +64,6 @@ pub struct SystemInfo {
     pub arch: String,
     pub version: String,
     pub hardware_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct LicenseVerification {
-    pub valid: bool,
-    pub plan: String,
-    pub expires_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -49,14 +92,20 @@ pub struct SmtpVerificationResult {
     pub technical_status: String,
 }
 
-// 1. Obtener Hardware ID del sistema Windows
+// 1. Obtener un identificador opaco de instalación, sin exponer seriales.
 #[tauri::command]
 fn get_system_info() -> SystemInfo {
+    let machine_name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown-machine".into());
+    let stable_material = format!("morfemail-installation-v1|{}|{}", machine_name, std::env::consts::ARCH);
+    let digest = Sha256::digest(stable_material.as_bytes());
+    let installation_id = digest.iter().map(|byte| format!("{:02x}", byte)).collect::<String>();
     SystemInfo {
-        os: "Windows 11 / 10".into(),
+        os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
-        version: "2.0.0".into(),
-        hardware_id: "HWID-WIN64-MORF-9281-LOCAL".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        hardware_id: format!("installation-{}", installation_id),
     }
 }
 
@@ -67,18 +116,7 @@ fn export_data_to_file(path: String, content: String) -> Result<bool, String> {
     Ok(true)
 }
 
-// 3. Verificación de licencia
-#[tauri::command]
-fn verify_polar_license(license_key: String) -> LicenseVerification {
-    let is_valid = license_key.starts_with("MORF-") && license_key.len() >= 12;
-    LicenseVerification {
-        valid: is_valid,
-        plan: if is_valid { "Licencia Comercial Anual".into() } else { "No Registrado".into() },
-        expires_at: "2027-08-26T00:00:00Z".into(),
-    }
-}
-
-// 4. Verificación Real de Dominio y Registros MX con Hickory Resolver (RFC 7505 Null MX)
+// 3. Verificación Real de Dominio y Registros MX con Hickory Resolver (RFC 7505 Null MX)
 #[tauri::command]
 async fn verify_email_domain(domain: String) -> DomainDnsResult {
     let clean_domain = domain.trim().trim_end_matches('.').to_lowercase();
@@ -93,21 +131,10 @@ async fn verify_email_domain(domain: String) -> DomainDnsResult {
     }
 
     // Configurar resolver asíncrono estándar de Google/Cloudflare/Sistema
-    let resolver = match TokioAsyncResolver::tokio(
+    let resolver = TokioAsyncResolver::tokio(
         ResolverConfig::cloudflare(),
         ResolverOpts::default()
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            return DomainDnsResult {
-                domain_exists: false,
-                mx_exists: false,
-                mx_records: vec![],
-                null_mx: false,
-                error: Some(format!("Error inicializando resolver DNS: {}", e)),
-            };
-        }
-    };
+    );
 
     let domain_with_dot = format!("{}.", clean_domain);
 
@@ -182,14 +209,14 @@ async fn verify_email_domain(domain: String) -> DomainDnsResult {
     }
 }
 
-// 5. Consulta directa de MX
+// 4. Consulta directa de MX
 #[tauri::command]
 async fn get_dns_mx(domain: String) -> Vec<MxRecordDto> {
     let res = verify_email_domain(domain).await;
     res.mx_records
 }
 
-// 6. Verificación SMTP Real, Multi-MX y Detección Catch-All mediante Handshake Robusto
+// 5. Verificación SMTP Real, Multi-MX y Detección Catch-All mediante Handshake Robusto
 fn is_smtp_response_complete(text: &str) -> Option<u16> {
     let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
     if lines.is_empty() {
@@ -455,14 +482,26 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            app.manage(LocalEngine::default());
+            if let Err(error) = start_local_engine(&app.handle()) {
+                eprintln!("{error}");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_system_info,
             export_data_to_file,
-            verify_polar_license,
             verify_email_domain,
             get_dns_mx,
             verify_email_smtp
         ])
-        .run(tauri::generate_context!())
-        .expect("Error al iniciar la aplicación desktop MorfEmail en Windows");
+        .build(tauri::generate_context!())
+        .expect("Error al preparar la aplicación desktop MorfEmail en Windows")
+        .run(|app, event| {
+            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                stop_local_engine(app);
+            }
+        });
 }

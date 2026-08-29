@@ -7,7 +7,7 @@ export interface TauriEnvironmentInfo {
   isTauri: boolean;
   platform: 'windows' | 'macos' | 'linux' | 'web';
   appVersion: string;
-  hardwareId: string;
+  installationId: string;
 }
 
 export class TauriBridge {
@@ -21,17 +21,28 @@ export class TauriBridge {
       isTauri,
       platform: isTauri ? 'windows' : 'web',
       appVersion: '2.0.0',
-      hardwareId: this.getHardwareId()
+      installationId: this.getInstallationId()
     };
   }
 
-  public static getHardwareId(): string {
-    let hwid = localStorage.getItem('morfemail_hwid');
-    if (!hwid) {
-      hwid = `HWID-WIN11-${Math.random().toString(36).substring(2, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
-      localStorage.setItem('morfemail_hwid', hwid);
+  /**
+   * Identificador opaco y estable de esta instalación.
+   * No intenta leer ni exponer seriales, nombres de equipo o huellas invasivas.
+   */
+  public static getInstallationId(): string {
+    const storageKey = 'morfemail_installation_id';
+    let installationId = localStorage.getItem(storageKey);
+    if (!installationId) {
+      installationId = globalThis.crypto?.randomUUID?.();
+      if (!installationId) throw new Error('El navegador no ofrece un generador criptográfico para la instalación.');
+      localStorage.setItem(storageKey, installationId);
     }
-    return hwid;
+    return installationId;
+  }
+
+  /** @deprecated Usa getInstallationId(): el producto no usa un HWID de hardware. */
+  public static getHardwareId(): string {
+    return this.getInstallationId();
   }
 
   /**
@@ -40,10 +51,8 @@ export class TauriBridge {
   public static async invokeCommand<T>(cmd: string, args?: Record<string, any>): Promise<T> {
     if (this.isTauriDetected()) {
       try {
-        const tauri = (window as any).__TAURI__;
-        if (tauri && tauri.core && tauri.core.invoke) {
-          return await tauri.core.invoke(cmd, args);
-        }
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<T>(cmd, args);
       } catch (e) {
         console.warn(`[TauriBridge] Native command '${cmd}' failed, executing fallback.`, e);
       }

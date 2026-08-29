@@ -6,19 +6,22 @@ import {
   Minus, 
   Square, 
   X, 
-  Cpu, 
-  CheckCircle2, 
   Bot,
   ExternalLink,
-  Keyboard,
-  ShieldCheck
+  Keyboard
 } from 'lucide-react';
-import { ActiveView } from '../types';
+import { ActiveView, AppNotification, PolarBillingState } from '../types';
+import morfEmailMark from '../assets/branding/morfemail-mark.png';
+import type { CentralLicenseValidation } from '../services/billingService';
 
 interface TitleBarProps {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
   engineStatus: 'ready' | 'scanning' | 'paused' | 'idle';
+  billingState: PolarBillingState | null;
+  centralLicense: CentralLicenseValidation | null;
+  notifications: AppNotification[];
+  onClearNotifications: () => void;
   onShowOnboarding: () => void;
   addToast: (title: string, message?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
 }
@@ -26,6 +29,10 @@ interface TitleBarProps {
 export const TitleBar: React.FC<TitleBarProps> = ({
   setActiveView,
   engineStatus,
+  billingState,
+  centralLicense,
+  notifications,
+  onClearNotifications,
   onShowOnboarding,
   addToast
 }) => {
@@ -40,7 +47,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       setIsMaximized(!isMaximized);
       addToast(isMaximized ? 'Ventana restaurada' : 'Ventana maximizada', undefined, 'info');
     } else if (action === 'close') {
-      addToast('CodeMorf Leads', 'Minimizado al área de notificación para no interrumpir búsquedas en segundo plano.', 'info');
+      addToast('MorfEmail', 'Minimizado al área de notificación para no interrumpir búsquedas en segundo plano.', 'info');
     }
   };
 
@@ -49,21 +56,15 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       {/* Left: Brand Identity */}
       <div className="flex items-center space-x-2.5">
         <div className="flex items-center space-x-1.5 cursor-pointer" onClick={() => setActiveView('dashboard')}>
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#F04438] to-[#D92D20] flex items-center justify-center shadow-sm shadow-[#F04438]/30">
-            <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="7" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <path d="M11 8v6M8 11h6" />
-            </svg>
-          </div>
+          <img src={morfEmailMark} alt="" aria-hidden="true" className="h-6 w-6 rounded-md object-cover shadow-sm shadow-[#F04438]/30" />
           <div className="flex items-center space-x-1">
-            <span className="font-semibold text-slate-100 tracking-wide text-sm">CodeMorf</span>
-            <span className="font-bold text-[#F04438] text-sm">Leads</span>
+            <span className="font-semibold text-slate-100 tracking-wide text-sm">Morf</span>
+            <span className="font-bold text-[#F04438] text-sm">Email</span>
           </div>
         </div>
         
         <span className="text-slate-600">|</span>
-        <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">v2.4.0 Desktop Pro</span>
+        <span className="text-[11px] text-slate-400 hidden sm:inline">Aplicación de escritorio</span>
       </div>
 
       {/* Center: Engine Status */}
@@ -118,31 +119,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             title="Notificaciones"
           >
             <Bell className="w-3.5 h-3.5" />
-            <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[#F04438] rounded-full"></span>
+            {notifications.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#F04438] text-white text-[8px] font-bold leading-3.5 text-center">{Math.min(notifications.length, 9)}</span>}
           </button>
 
           {showNotifications && (
             <div className="absolute right-0 mt-2 w-72 bg-[#1A1D21] border border-[#2B3037] rounded-lg shadow-2xl p-3 z-50 text-slate-200 text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-[#2B3037] mb-2 font-semibold">
-                <span>Notificaciones</span>
-                <span className="text-[10px] text-[#F04438] bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/30">2 nuevas</span>
-              </div>
-              <div className="space-y-2">
-                <div className="p-2 rounded bg-[#22262B] border border-slate-700/50">
-                  <div className="font-medium text-slate-100 flex items-center justify-between">
-                    <span>Búsqueda completada</span>
-                    <span className="text-[10px] text-slate-400">Hace 15m</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">2,341 leads extraídos para "Restaurantes Santo Domingo".</p>
-                </div>
-                <div className="p-2 rounded bg-[#22262B] border border-slate-700/50">
-                  <div className="font-medium text-slate-100 flex items-center justify-between">
-                    <span>Verificación de emails</span>
-                    <span className="text-[10px] text-slate-400">Hace 1h</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">93.2% de emails validados con registros MX.</p>
-                </div>
-              </div>
+              <div className="flex items-center justify-between pb-2 border-b border-[#2B3037] mb-2"><div className="font-semibold">Notificaciones</div>{notifications.length > 0 && <button onClick={onClearNotifications} className="text-[10px] text-slate-400 hover:text-white">Limpiar</button>}</div>
+              {notifications.length === 0 ? <p className="text-[11px] text-slate-400">No hay notificaciones recientes.</p> : <div className="space-y-2">{notifications.slice(0, 5).map((notification) => <div key={notification.id} className="rounded-md bg-[#22262B] p-2"><div className="text-[11px] font-semibold text-slate-100">{notification.title}</div><p className="mt-0.5 text-[10px] leading-snug text-slate-400">{notification.message}</p><div className="mt-1 text-[9px] text-slate-500">{notification.createdAt}</div></div>)}</div>}
             </div>
           )}
         </div>
@@ -219,9 +202,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-slate-600 to-slate-400 text-white flex items-center justify-center font-bold text-[10px]">
             J
           </div>
-          <span className="font-medium text-slate-200 text-[11px] hidden md:inline">Jhon D.</span>
-          <span className="px-1.5 py-0.2 text-[9px] font-bold bg-[#F04438] text-white rounded tracking-wider">
-            PRO
+          <span className="font-medium text-slate-200 text-[11px] hidden md:inline">Cuenta local</span>
+          <span className="px-1.5 py-0.2 text-[9px] font-bold bg-[#22262B] text-slate-300 rounded tracking-wider">
+            {centralLicense?.valid ? (centralLicense.serviceName || centralLicense.plan || 'MorfEmail') : billingState?.planName || (billingState ? 'SIN PLAN' : 'CARGANDO')}
           </span>
         </div>
 

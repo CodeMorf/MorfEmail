@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -18,50 +18,106 @@ import { SettingsView } from './components/SettingsView';
 import { OnboardingModal } from './components/OnboardingModal';
 import { ToastContainer } from './components/Toast';
 
-import { ActiveView, Lead, LeadList, SearchConfig, SearchHistoryItem, ToastMessage, ScheduledSearch, ScheduleInterval, AiConfig, ProxyConfig } from './types';
-import { INITIAL_LEADS, INITIAL_HISTORY, INITIAL_LISTS, DEFAULT_SEARCH_CONFIG, INITIAL_SCHEDULED_SEARCHES, INITIAL_AI_CONFIG, INITIAL_PROXY_CONFIG } from './data/mockData';
+import { ActiveView, AppNotification, Lead, LeadList, SearchConfig, SearchHistoryItem, ToastMessage, ScheduledSearch, ScheduleInterval, AiConfig, ProxyConfig, PolarBillingState } from './types';
+import { DEFAULT_SEARCH_CONFIG, INITIAL_AI_CONFIG, INITIAL_PROXY_CONFIG } from './data/mockData';
 import { SearchService } from './services/searchService';
+import { billingService, getMorfEmailInstallationId, getStoredMorfEmailLicenseKey, type CentralLicenseValidation } from './services/billingService';
+import { waitForLocalApi } from './services/localApi';
+import { notifyDesktop } from './services/desktopNotifications';
 import { SqliteClient } from '../engine/database/sqliteClient';
 
 export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
-  const [history, setHistory] = useState<SearchHistoryItem[]>(INITIAL_HISTORY);
-  const [lists, setLists] = useState<LeadList[]>(INITIAL_LISTS);
-  const [scheduledSearches, setScheduledSearches] = useState<ScheduledSearch[]>(INITIAL_SCHEDULED_SEARCHES);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [history, setHistory] = useState<SearchHistoryItem[]>([]);
+  const [lists, setLists] = useState<LeadList[]>([]);
+  const [scheduledSearches, setScheduledSearches] = useState<ScheduledSearch[]>([]);
   const [searchConfig, setSearchConfig] = useState<SearchConfig>(DEFAULT_SEARCH_CONFIG);
   const [aiConfig, setAiConfig] = useState<AiConfig>(INITIAL_AI_CONFIG);
   const [proxyConfig, setProxyConfig] = useState<ProxyConfig>(INITIAL_PROXY_CONFIG);
+  const [billingState, setBillingState] = useState<PolarBillingState | null>(null);
+  const [centralLicense, setCentralLicense] = useState<CentralLicenseValidation | null>(null);
+  const [licenseStatus, setLicenseStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
+  const [licenseError, setLicenseError] = useState('');
   
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [engineStatus, setEngineStatus] = useState<'ready' | 'scanning' | 'paused' | 'idle'>('ready');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const searchService = SearchService.getInstance();
   const sqlite = SqliteClient.getInstance();
 
-  // Load persistent leads and searches from SQLite on startup
-  useEffect(() => {
+  const verifyStoredLicense = useCallback(async () => {
+    const licenseKey = getStoredMorfEmailLicenseKey();
+    if (!licenseKey) {
+      setCentralLicense(null);
+      setLicenseStatus('invalid');
+      setLicenseError('MorfEmail necesita una licencia activa para continuar.');
+      return;
+    }
+
     try {
-      const savedLeads = sqlite.getAllLeads();
-      if (savedLeads && savedLeads.length > 0) {
-        const appLeads = savedLeads.map((l) => searchService.normalizeEngineLeadToAppLead(l));
-        setLeads((prev) => {
-          const merged = [...appLeads];
-          for (const item of prev) {
-            if (!merged.some((m) => m.id === item.id || (m.website && m.website === item.website))) {
-              merged.push(item);
-            }
-          }
-          return merged;
-        });
+      const result = await billingService.validateLicense(licenseKey, getMorfEmailInstallationId());
+      if (result.valid) {
+        setCentralLicense(result);
+        setLicenseStatus('valid');
+        setLicenseError('');
+      } else {
+        setCentralLicense(null);
+        setLicenseStatus('invalid');
+        setLicenseError(result.error || 'La licencia no está activa o ya venció.');
       }
-    } catch {
-      // Usar estado inicial si el storage local está limpio
+    } catch (error) {
+      setLicenseStatus('invalid');
+      setLicenseError(error instanceof Error ? error.message : 'No se pudo validar la licencia.');
     }
   }, []);
+
+  const handleLicenseValidated = useCallback((license: CentralLicenseValidation) => {
+    if (license.valid) {
+      setCentralLicense(license);
+      setLicenseStatus('valid');
+      setLicenseError('');
+    }
+  }, []);
+
+  useEffect(() => {
+    void verifyStoredLicense();
+    const interval = window.setInterval(() => void verifyStoredLicense(), 15 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [verifyStoredLicense]);
+
+  // Load persistent leads and searches from the local SQLite API on startup.
+  useEffect(() => {
+    if (licenseStatus !== 'valid') return;
+    void waitForLocalApi().then(() => Promise.all([sqlite.getAllLeads(), sqlite.getAllSearches()])).then(([savedLeads, savedSearches]) => {
+      setLeads(savedLeads.map((lead) => searchService.normalizeEngineLeadToAppLead(lead)));
+      setHistory(savedSearches.map((search) => ({
+        id: search.id,
+        query: search.query,
+        country: search.country,
+        flag: search.country_code === 'ES' ? '🇪🇸' : search.country_code === 'US' ? '🇺🇸' : '🇩🇴',
+        city: search.city || 'Nacional',
+        category: search.category,
+        leadsFound: search.leads_found,
+        exportedCount: search.exported_count,
+        duration: `${Math.floor(search.duration_sec / 60)}m ${search.duration_sec % 60}s`,
+        status: search.status === 'completed' ? 'completed' : search.status === 'failed' ? 'failed' : search.status === 'paused' ? 'paused' : 'processing',
+        date: new Date(search.created_at).toLocaleString(),
+        config: { country: search.country, countryCode: search.country_code, city: search.city, businessType: search.category, targetDomain: search.target_domain || undefined }
+      })));
+    }).catch((error) => {
+      addToast('SQLite local no disponible', error instanceof Error ? error.message : String(error), 'error');
+    });
+  }, [licenseStatus, searchService, sqlite]);
+
+  useEffect(() => {
+    if (licenseStatus !== 'valid') return;
+    void billingService.getState().then(setBillingState).catch(() => setBillingState(null));
+  }, [licenseStatus]);
 
   // Toast Helper
   const addToast = (
@@ -69,7 +125,7 @@ export default function App() {
     message?: string,
     type: 'success' | 'info' | 'warning' | 'error' = 'info'
   ) => {
-    const id = `toast-${Date.now()}-${Math.random()}`;
+    const id = `toast-${Date.now()}-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`;
     const newToast: ToastMessage = { id, title, message, type };
     setToasts((prev) => [...prev, newToast]);
 
@@ -80,6 +136,17 @@ export default function App() {
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const addNotification = (title: string, message: string, type: AppNotification['type'] = 'info') => {
+    const item: AppNotification = {
+      id: `notification-${Date.now()}-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`,
+      title,
+      message,
+      type,
+      createdAt: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })
+    };
+    setNotifications((prev) => [item, ...prev].slice(0, 10));
   };
 
   // Keyboard shortcuts listener (Windows desktop feel)
@@ -100,6 +167,11 @@ export default function App() {
 
   // Search Flow
   const handleStartSearch = async () => {
+    if (licenseStatus !== 'valid') {
+      setActiveView('license');
+      addToast('Licencia requerida', 'Activa una licencia de MorfEmail antes de iniciar búsquedas.', 'warning');
+      return;
+    }
     setEngineStatus('scanning');
     setActiveView('search-progress');
     addToast('Búsqueda iniciada', `Iniciando motor de rastreo para "${searchConfig.businessType}" en ${searchConfig.country}.`, 'info');
@@ -111,7 +183,9 @@ export default function App() {
         concurrency: 8
       });
     } catch (err: any) {
-      addToast('Aviso del motor', 'Ejecutando en modo de extracción local optimizado.', 'info');
+      setEngineStatus('ready');
+      setActiveView('new-search');
+      addToast('No se pudo iniciar la búsqueda', err?.message || 'El API local no respondió.', 'error');
     }
   };
 
@@ -136,7 +210,7 @@ export default function App() {
       flag: searchConfig.flag,
       city: searchConfig.city || 'Nacional',
       category: searchConfig.businessType,
-      leadsFound: stats.businessesFound || 4192,
+      leadsFound: stats.businessesFound,
       exportedCount: 0,
       duration: `${Math.floor(stats.elapsedTimeSec / 60)}m ${stats.elapsedTimeSec % 60}s`,
       status: 'completed',
@@ -145,8 +219,11 @@ export default function App() {
     };
 
     setHistory((prev) => [newHistoryItem, ...prev]);
-    setActiveView('results');
-    addToast('Extracción finalizada', `${stats.businessesFound || 4192} empresas agregadas a la vista de Resultados y guardadas en SQLite.`, 'success');
+    const completionMessage = `${stats.businessesFound} empresas agregadas a Resultados y guardadas en SQLite.`;
+    addNotification('Búsqueda completada', completionMessage, 'success');
+    void notifyDesktop('MorfEmail · Búsqueda completada', completionMessage);
+    if (activeView === 'search-progress') setActiveView('results');
+    addToast('Extracción finalizada', completionMessage, 'success');
   };
 
   const handleRepeatSearch = async (item: SearchHistoryItem) => {
@@ -207,6 +284,9 @@ export default function App() {
 
   const handleDeleteLeads = (leadIds: string[]) => {
     setLeads((prev) => prev.filter((l) => !leadIds.includes(l.id)));
+    void Promise.all(leadIds.map((leadId) => sqlite.deleteLead(leadId))).catch((error) => {
+      addToast('Error al borrar leads', error instanceof Error ? error.message : String(error), 'error');
+    });
   };
 
   // List management
@@ -317,71 +397,47 @@ export default function App() {
     addToast('Automatización eliminada', `Se ha removido "${itemToDelete?.title || 'la búsqueda programada'}".`, 'info');
   };
 
-  const handleRunScheduledSearchNow = (id: string) => {
+  const handleRunScheduledSearchNow = async (id: string) => {
     const scheduled = scheduledSearches.find((s) => s.id === id);
     if (!scheduled) return;
-
-    const newHarvestedCount = Math.floor(Math.random() * 180) + 220; // 220 - 400 new leads
-
-    // Update scheduled search stats
-    setScheduledSearches((prev) =>
-      prev.map((s) => {
-        if (s.id === id) {
-          return {
-            ...s,
-            lastRun: 'Hoy (Ahora mismo)',
-            nextRun: s.interval === 'hourly_6' ? 'En 6 horas' : s.interval === 'daily' ? 'Mañana a las 06:00 AM' : 'En 7 días',
-            leadsHarvestedTotal: s.leadsHarvestedTotal + newHarvestedCount,
-            newLeadsLastRun: newHarvestedCount
-          };
-        }
-        return s;
-      })
-    );
-
-    // Update target list lead count
-    setLists((prev) =>
-      prev.map((l) => {
-        if (l.id === scheduled.targetListId) {
-          return {
-            ...l,
-            leadCount: l.leadCount + newHarvestedCount,
-            updatedAt: 'Ahora mismo (Auto-Sync)'
-          };
-        }
-        return l;
-      })
-    );
-
-    // Add to history log
-    const syncHistoryItem: SearchHistoryItem = {
-      id: `hist-auto-${Date.now()}`,
-      query: `⚡ [Auto-Sync] ${scheduled.category} (${scheduled.city || scheduled.country})`,
+    const config: SearchConfig = {
+      ...DEFAULT_SEARCH_CONFIG,
       country: scheduled.country,
+      countryCode: scheduled.countryCode,
       flag: scheduled.flag,
-      city: scheduled.city || 'Nacional',
-      category: scheduled.category,
-      leadsFound: newHarvestedCount,
-      exportedCount: 0,
-      duration: '48s',
-      status: 'completed',
-      date: 'Hoy (Auto-Refresh)',
-      config: {
-        country: scheduled.country,
-        countryCode: scheduled.countryCode,
-        flag: scheduled.flag,
-        businessType: scheduled.category,
-        city: scheduled.city || ''
-      }
+      state: scheduled.state || '',
+      city: scheduled.city || '',
+      businessType: scheduled.category,
+      quantity: scheduled.quantityPerRun,
+      contactType: 'b2b_recommended'
     };
-    setHistory((prev) => [syncHistoryItem, ...prev]);
-
-    addToast(
-      'Auto-Refresh completado',
-      `+${newHarvestedCount} nuevos leads sincronizados y agregados a "${scheduled.targetListName}".`,
-      'success'
-    );
+    setSearchConfig(config);
+    setEngineStatus('scanning');
+    setActiveView('search-progress');
+    try {
+      await searchService.executeSearch(config, { mode: 'auto', headless: true, concurrency: 8 });
+    } catch (error) {
+      setEngineStatus('ready');
+      setActiveView('new-search');
+      addToast('Auto-Refresh fallido', error instanceof Error ? error.message : String(error), 'error');
+    }
   };
+
+  if (licenseStatus !== 'valid') {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 text-slate-900 overflow-y-auto">
+        <LicenseView
+          setActiveView={setActiveView}
+          addToast={addToast}
+          requiredAccess={licenseStatus === 'invalid'}
+          onLicenseValidated={handleLicenseValidated}
+        />
+        {licenseError && licenseStatus === 'checking' && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2 text-xs text-white shadow-xl">{licenseError}</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#F6F7F9] text-slate-800 font-sans select-none overflow-hidden antialiased">
@@ -390,6 +446,10 @@ export default function App() {
         activeView={activeView}
         setActiveView={setActiveView}
         engineStatus={engineStatus}
+        billingState={billingState}
+        centralLicense={centralLicense}
+        notifications={notifications}
+        onClearNotifications={() => setNotifications([])}
         onShowOnboarding={() => setIsOnboardingOpen(true)}
         addToast={addToast}
       />
@@ -401,6 +461,8 @@ export default function App() {
           activeView={activeView}
           setActiveView={setActiveView}
           resultsCount={leads.length}
+          billingState={billingState}
+          centralLicense={centralLicense}
           openExportModal={() => setIsExportModalOpen(true)}
         />
 
@@ -410,6 +472,7 @@ export default function App() {
             <DashboardView
               setActiveView={setActiveView}
               history={history}
+              leads={leads}
               scheduledSearches={scheduledSearches}
               lists={lists}
               onRepeatSearch={handleRepeatSearch}
@@ -431,7 +494,7 @@ export default function App() {
             />
           )}
 
-          {activeView === 'search-progress' && (
+          <div className={activeView === 'search-progress' ? 'contents' : 'hidden'} aria-hidden={activeView !== 'search-progress'}>
             <SearchProgressView
               config={searchConfig}
               setActiveView={setActiveView}
@@ -439,7 +502,7 @@ export default function App() {
               addToast={addToast}
               onNewLeadDiscovered={handleLeadDiscovered}
             />
-          )}
+          </div>
 
           {activeView === 'results' && (
             <ResultsView
@@ -500,7 +563,7 @@ export default function App() {
           )}
 
           {activeView === 'plan-usage' && (
-            <PlanUsageView addToast={addToast} />
+            <PlanUsageView addToast={addToast} centralLicense={centralLicense} />
           )}
 
           {activeView === 'settings' && (

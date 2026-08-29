@@ -87,16 +87,38 @@ export interface DbCrawlQueueItem {
   max_depth: number;
   parent_url?: string;
   retry_count: number;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'restricted';
   created_at: string;
 }
 
 export interface DbExportRecord {
   id: string;
   file_name: string;
-  format: 'csv' | 'xlsx' | 'json';
+  format: 'csv' | 'xlsx' | 'json' | 'txt';
   record_count: number;
   file_size_bytes: number;
   destination_path?: string;
   created_at: string;
+}
+
+export interface DbBillingState {
+  id: 1;
+  status: string;
+  environment: 'production' | 'sandbox';
+  plan_name?: string;
+  product_id?: string;
+  polar_customer_id?: string;
+  polar_subscription_id?: string;
+  current_period_start?: string;
+  current_period_end?: string;
+  cancel_at_period_end?: number;
+  last_event_at?: string;
+  updated_at: string;
+}
+
+export interface DbBillingEvent {
+  event_id: string;
+  event_type: string;
+  payload_json: string;
+  received_at: string;
 }

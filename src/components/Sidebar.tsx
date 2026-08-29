@@ -16,20 +16,25 @@ import {
   Zap,
   ArrowUpRight
 } from 'lucide-react';
-import { ActiveView } from '../types';
+import { ActiveView, PolarBillingState } from '../types';
+import type { CentralLicenseValidation } from '../services/billingService';
 
 interface SidebarProps {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
   resultsCount: number;
   openExportModal: () => void;
+  billingState: PolarBillingState | null;
+  centralLicense: CentralLicenseValidation | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeView,
   setActiveView,
   resultsCount,
-  openExportModal
+  openExportModal,
+  billingState,
+  centralLicense
 }) => {
   const navSections = [
     {
@@ -39,7 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'new-search', label: 'Nueva búsqueda', icon: Search, badge: 'HOT', isHighlight: true },
         { id: 'results', label: 'Resultados', icon: Users, badge: resultsCount > 0 ? resultsCount.toLocaleString() : null },
         { id: 'history', label: 'Historial', icon: History, badge: null },
-        { id: 'lists', label: 'Listas', icon: Bookmark, badge: '5' },
+        { id: 'lists', label: 'Listas', icon: Bookmark, badge: null },
       ]
     },
     {
@@ -54,7 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       title: 'CUENTA',
       items: [
-        { id: 'license', label: 'Licencia', icon: Key, badge: 'PRO' },
+        { id: 'license', label: 'Licencia', icon: Key, badge: null },
         { id: 'plan-usage', label: 'Plan y uso', icon: CreditCard, badge: null },
         { id: 'settings', label: 'Configuración', icon: Settings, badge: null },
       ]
@@ -137,30 +142,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5">
               <Zap className="w-3.5 h-3.5 text-[#F04438]" />
-              <span className="text-xs font-bold text-slate-100 tracking-wide">PLAN PRO</span>
+              <span className="text-xs font-bold text-slate-100 tracking-wide">MorfEmail</span>
             </div>
             <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">
-              Activo
+              {centralLicense?.valid || billingState?.status === 'active' || billingState?.status === 'trialing' ? 'Activo' : 'Sin plan'}
             </span>
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between text-[11px] text-slate-400">
-              <span>Créditos consumidos</span>
-              <span className="font-mono text-slate-200">18,420 / 25,000</span>
+                <span>Plan</span>
+                <span className="text-slate-200 truncate max-w-[8rem]">{centralLicense?.valid ? (centralLicense.serviceName || centralLicense.plan || 'MorfEmail') : billingState?.planName || 'Sin plan activo'}</span>
             </div>
-            
-            {/* Progress bar */}
-            <div className="w-full h-1.5 bg-[#262B32] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#F04438] to-[#FC8181] rounded-full"
-                style={{ width: '74%' }}
-              ></div>
-            </div>
-            
             <div className="flex justify-between text-[10px] text-slate-300 pt-0.5">
-              <span>74% utilizado</span>
-              <span>Renueva: 26 Sep 2026</span>
+                <span>Licencia</span>
+                <span>{centralLicense?.valid || billingState?.status === 'active' || billingState?.status === 'trialing' ? 'Activa' : 'Pendiente'}</span>
             </div>
           </div>
 
@@ -168,7 +164,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setActiveView('plan-usage')}
             className="w-full flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-[#262B32] hover:bg-[#F04438] text-slate-200 hover:text-white rounded-md text-xs font-medium transition-all group"
           >
-            <span>Mejorar plan</span>
+            <span>Ver planes</span>
             <ArrowUpRight className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
           </button>
         </div>

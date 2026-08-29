@@ -1,10 +1,29 @@
 import express from 'express';
+import 'dotenv/config';
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import { chromium, type Browser } from 'playwright';
+import { WebhookVerificationError } from '@polar-sh/sdk/webhooks';
+import { CrawlJobManager } from './crawlJobManager';
+import { LocalDb } from './localDb';
+import { PolarBillingService } from './polarBilling';
+import type { DbExportRecord, DbSearch } from '../engine/database/models';
+import type { NormalizedLead } from '../engine/types';
 
 const app = express();
+app.use('/api/webhooks/polar', express.raw({ type: 'application/json', limit: '256kb' }));
 app.use(express.json({ limit: '256kb' }));
+app.use('/api', (req, res, next) => {
+  const origin = req.headers.origin;
+  const allowed = !origin || origin === 'tauri://localhost' || origin === 'http://tauri.localhost' || origin.startsWith('http://127.0.0.1:') || origin.startsWith('http://localhost:');
+  if (!allowed) return res.status(403).json({ error: 'Origen no permitido para el motor local.' });
+  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 const PORT = Number(process.env.MORFEMAIL_API_PORT || 3100);
 const USER_AGENT =
@@ -17,12 +36,15 @@ const OVERPASS_URLS = (process.env.MORFEMAIL_OVERPASS_URLS ||
   .map((value) => value.trim())
   .filter(Boolean);
 
-const MAX_DISCOVERY_RESULTS = 250;
+const MAX_DISCOVERY_RESULTS = 500;
 const MAX_HTML_BYTES = 3 * 1024 * 1024;
 const geocodeCache = new Map<string, { expiresAt: number; bbox: [number, number, number, number] }>();
 const hostLastAccess = new Map<string, number>();
 let lastNominatimRequestAt = 0;
+let lastOverpassRequestAt = 0;
 let browserPromise: Promise<Browser> | null = null;
+const localDb = new LocalDb();
+const polarBilling = new PolarBillingService();
 
 interface DiscoveryInput {
   country: string;
@@ -31,6 +53,7 @@ interface DiscoveryInput {
   city?: string;
   category: string;
   limit?: number;
+  targetDomain?: string;
 }
 
 interface OsmElement {
@@ -92,26 +115,6 @@ function buildAddress(tags: Record<string, string>): string {
     .join(', ');
 }
 
-function deriveWebsiteFromBusinessEmail(email: string): string {
-  const match = email.trim().toLowerCase().match(/^[^@\s]+@([^@\s]+)$/);
-  if (!match) return '';
-  const domain = match[1];
-  const freeProviders = new Set([
-    'gmail.com',
-    'googlemail.com',
-    'outlook.com',
-    'hotmail.com',
-    'live.com',
-    'yahoo.com',
-    'icloud.com',
-    'proton.me',
-    'protonmail.com',
-    'aol.com'
-  ]);
-  if (freeProviders.has(domain)) return '';
-  return normalizeWebsite(domain);
-}
-
 function getCategoryClauses(category: string): string[] {
   const value = category.toLowerCase();
 
@@ -153,9 +156,12 @@ async function geocodeScope(input: DiscoveryInput): Promise<[number, number, num
   if (sinceLast < 1100) await sleep(1100 - sinceLast);
 
   const url = new URL(`${NOMINATIM_URL}/search`);
-  url.searchParams.set('q', [city, state, input.country].filter(Boolean).join(', '));
+  // No repetir ciudad/estado en la consulta: en RD ambos pueden llamarse
+  // Santo Domingo y Nominatim podría devolver una carretera con un bbox
+  // diminuto en lugar del municipio.
+  url.searchParams.set('q', [city || state, input.country].filter(Boolean).join(', '));
   url.searchParams.set('format', 'jsonv2');
-  url.searchParams.set('limit', '1');
+  url.searchParams.set('limit', '5');
   url.searchParams.set('addressdetails', '1');
   if (input.countryCode) url.searchParams.set('countrycodes', input.countryCode.toLowerCase());
 
@@ -169,8 +175,9 @@ async function geocodeScope(input: DiscoveryInput): Promise<[number, number, num
   });
 
   if (!response.ok) throw new Error(`Nominatim respondió HTTP ${response.status}`);
-  const results = (await response.json()) as Array<{ boundingbox?: string[] }>;
-  const bbox = results[0]?.boundingbox;
+  const results = (await response.json()) as Array<{ boundingbox?: string[]; addresstype?: string; type?: string }>;
+  const preferred = results.find((result) => ['city', 'town', 'municipality', 'state', 'county'].includes(String(result.addresstype || '').toLowerCase()));
+  const bbox = (preferred || results[0])?.boundingbox;
   if (!bbox || bbox.length !== 4) return null;
 
   const parsed: [number, number, number, number] = [
@@ -207,36 +214,45 @@ function buildOverpassQuery(input: DiscoveryInput, bbox: [number, number, number
 async function queryOverpass(query: string): Promise<{ elements: OsmElement[]; endpoint: string }> {
   let lastError: Error | null = null;
 
-  for (const endpoint of OVERPASS_URLS) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'User-Agent': USER_AGENT,
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          Accept: 'application/json'
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
+  // Los endpoints públicos son compartidos y pueden fallar de forma temporal.
+  // Se reintenta con pausa y se rota el endpoint; no se paralelizan consultas.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    for (const endpoint of OVERPASS_URLS) {
+      try {
+        const sinceLast = Date.now() - lastOverpassRequestAt;
+        if (sinceLast < 1100) await sleep(1100 - sinceLast);
+        lastOverpassRequestAt = Date.now();
 
-      if (response.status === 429) {
-        lastError = new Error(`Overpass ${endpoint} aplicó rate limit (429)`);
-        continue;
-      }
-      if (!response.ok) {
-        lastError = new Error(`Overpass ${endpoint} respondió HTTP ${response.status}`);
-        continue;
-      }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 35_000);
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            Accept: 'application/json'
+          },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
 
-      const data = (await response.json()) as { elements?: OsmElement[] };
-      return { elements: data.elements || [], endpoint };
-    } catch (error: any) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+        if (response.status === 429) {
+          lastError = new Error(`Overpass ${endpoint} aplicó rate limit (429)`);
+          continue;
+        }
+        if (!response.ok) {
+          lastError = new Error(`Overpass ${endpoint} respondió HTTP ${response.status}`);
+          continue;
+        }
+
+        const data = (await response.json()) as { elements?: OsmElement[] };
+        return { elements: data.elements || [], endpoint };
+      } catch (error: any) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
     }
+    if (attempt < 3) await sleep(1500 * attempt);
   }
 
   throw lastError || new Error('No se pudo consultar ningún endpoint Overpass');
@@ -358,8 +374,181 @@ async function getBrowser(): Promise<Browser> {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'MorfEmail Local Engine', version: '2.1-local' });
+  res.json({
+    ok: true,
+    service: 'MorfEmail Local Engine',
+    version: '2.2-local',
+    storage: 'better-sqlite3',
+    database: localDb.stats(),
+    billing: polarBilling.getPublicConfig()
+  });
 });
+
+app.get('/api/stats', (_req, res) => {
+  res.json(localDb.stats());
+});
+
+app.get('/api/billing/config', (_req, res) => {
+  return res.json(polarBilling.getPublicConfig());
+});
+
+app.get('/api/billing/state', (_req, res) => {
+  return res.json({ state: polarBilling.getPublicState(localDb) });
+});
+
+app.get('/api/billing/plans', async (_req, res) => {
+  try {
+    return res.json(await polarBilling.getPlans());
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post('/api/billing/checkout', async (req, res) => {
+  try {
+    const planKey = typeof req.body?.planKey === 'string' ? req.body.planKey.trim() : '';
+    const customerEmail = typeof req.body?.customerEmail === 'string' ? req.body.customerEmail : undefined;
+    if (!planKey) return res.status(400).json({ error: 'planKey es obligatorio' });
+    return res.status(201).json(await polarBilling.createCheckout({ planKey, customerEmail }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(message.includes('no está configurado') || message.includes('no se ha configurado') ? 503 : 400).json({ error: message });
+  }
+});
+
+app.post('/api/billing/portal', async (_req, res) => {
+  try {
+    return res.json(await polarBilling.createCustomerPortal(localDb));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(message.includes('no está configurado') || message.includes('no hay un cliente') ? 409 : 502).json({ error: message });
+  }
+});
+
+app.post('/api/webhooks/polar', (req, res) => {
+  try {
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
+    const headers = Object.fromEntries(
+      Object.entries(req.headers)
+        .filter(([, value]) => typeof value === 'string')
+        .map(([key, value]) => [key.toLowerCase(), String(value)])
+    );
+    const result = polarBilling.handleWebhook(body, headers, localDb);
+    return res.status(202).json({ ok: true, ...result });
+  } catch (error) {
+    if (error instanceof WebhookVerificationError) return res.status(403).json({ error: 'Firma de webhook inválida' });
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('POLAR_WEBHOOK_SECRET')) return res.status(503).json({ error: 'Webhook Polar no configurado' });
+    console.error('[MorfEmail] Error procesando webhook Polar:', message);
+    return res.status(500).json({ error: 'No se pudo procesar el webhook Polar' });
+  }
+});
+
+app.get('/api/searches', (_req, res) => {
+  res.json({ searches: localDb.listSearches() });
+});
+
+app.post('/api/searches', (req, res) => {
+  try {
+    const search = req.body as DbSearch;
+    if (!search?.id || !search.query || !search.country || !search.country_code || !search.city || !search.category) {
+      return res.status(400).json({ error: 'id, query, country, country_code, city y category son obligatorios' });
+    }
+    localDb.saveSearch({ ...search, status: search.status || 'queued', created_at: search.created_at || new Date().toISOString(), updated_at: new Date().toISOString() });
+    return res.status(201).json({ search });
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.patch('/api/searches/:id', (req, res) => {
+  localDb.updateSearch(req.params.id, req.body as Partial<DbSearch>);
+  return res.json({ ok: true });
+});
+
+app.get('/api/leads', (req, res) => {
+  const limit = Number(req.query.limit || 5000);
+  const searchId = typeof req.query.searchId === 'string' ? req.query.searchId : undefined;
+  return res.json({ leads: localDb.listLeads(searchId, limit) });
+});
+
+app.post('/api/leads', (req, res) => {
+  try {
+    const lead = req.body as NormalizedLead;
+    if (!lead?.id || !lead.businessName || !lead.website || !lead.domain || !lead.sourceUrl) {
+      return res.status(400).json({ error: 'lead incompleto: id, businessName, website, domain y sourceUrl son obligatorios' });
+    }
+    localDb.upsertLead(lead, typeof req.body.searchId === 'string' ? req.body.searchId : undefined);
+    return res.status(201).json({ lead });
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.delete('/api/leads/:id', (req, res) => {
+  localDb.deleteLead(req.params.id);
+  return res.status(204).send();
+});
+
+app.post('/api/exports', (req, res) => {
+  localDb.recordExport(req.body as DbExportRecord);
+  return res.status(201).json({ ok: true });
+});
+
+app.post('/api/crawl/start', (req, res) => {
+  try {
+    const { searchId, query, config } = req.body as { searchId?: string; query?: DiscoveryInput; config?: Record<string, unknown> };
+    if (!searchId || !query?.country || !query.countryCode || !query.category || !query.city) {
+      return res.status(400).json({ error: 'searchId y query.country, query.countryCode, query.city y query.category son obligatorios' });
+    }
+    if (!localDb.getSearch(searchId)) {
+      const now = new Date().toISOString();
+      localDb.saveSearch({
+        id: searchId,
+        query: query.targetDomain ? `TARGET DOMAIN ${query.targetDomain}` : `${query.category} en ${query.city}, ${query.country}`,
+        country: query.country,
+        country_code: query.countryCode,
+        state: query.state,
+        city: query.city,
+        category: query.category,
+        target_domain: query.targetDomain,
+        contact_type: query.targetDomain ? 'specific_domain' : 'b2b_recommended',
+        leads_found: 0,
+        exported_count: 0,
+        duration_sec: 0,
+        status: 'running',
+        created_at: now,
+        updated_at: now
+      });
+    }
+    const job = CrawlJobManager.start(searchId, query as any, {
+      mode: config?.mode === 'browser' || config?.mode === 'fast' ? config.mode : 'auto',
+      maxConcurrency: Math.min(12, Math.max(1, Number(config?.maxConcurrency || 8))),
+      browserConcurrency: Math.min(2, Math.max(1, Number(config?.browserConcurrency || 2))),
+      headless: config?.headless !== false,
+      requestTimeoutMs: Math.min(25000, Math.max(4000, Number(config?.requestTimeoutMs || 12000))),
+      maxRetries: Math.min(5, Math.max(0, Number(config?.maxRetries ?? 2))),
+      rateLimitPerDomainMs: Math.max(250, Number(config?.rateLimitPerDomainMs || 800)),
+      respectRobotsTxt: config?.respectRobotsTxt !== false,
+      crawlDepth: Math.min(3, Math.max(1, Number(config?.crawlDepth || 2)))
+    });
+    return res.status(202).json(job);
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get('/api/crawl/:id/status', (req, res) => {
+  const job = CrawlJobManager.get(req.params.id);
+  return job ? res.json(job) : res.status(404).json({ error: 'Crawl no encontrado' });
+});
+
+for (const action of ['pause', 'resume', 'stop'] as const) {
+  app.post(`/api/crawl/:id/${action}`, (req, res) => {
+    const changed = CrawlJobManager[action](req.params.id);
+    return changed ? res.json({ ok: true }) : res.status(409).json({ error: `No se puede ${action} ese crawl` });
+  });
+}
 
 app.post('/api/discovery', async (req, res) => {
   try {
@@ -386,12 +575,10 @@ app.post('/api/discovery', async (req, res) => {
       const phone = firstTag(tags, ['contact:phone', 'phone', 'contact:mobile', 'mobile']);
       const whatsapp = firstTag(tags, ['contact:whatsapp', 'whatsapp']);
       let website = normalizeWebsite(firstTag(tags, ['contact:website', 'website', 'url']));
-      if (!website && email) website = deriveWebsiteFromBusinessEmail(email);
-      if (!website) continue;
-
       const domain = canonicalDomain(website);
-      if (!domain || seen.has(domain)) continue;
-      seen.add(domain);
+      const businessKey = domain || `${element.type}:${element.id}`;
+      if (seen.has(businessKey)) continue;
+      seen.add(businessKey);
 
       const lat = element.lat ?? element.center?.lat;
       const lon = element.lon ?? element.center?.lon;
@@ -497,6 +684,7 @@ const server = app.listen(PORT, '127.0.0.1', () => {
 
 async function shutdown() {
   server.close();
+  localDb.close();
   if (browserPromise) {
     const browser = await browserPromise.catch(() => null);
     await browser?.close().catch(() => undefined);

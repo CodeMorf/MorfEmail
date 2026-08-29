@@ -72,11 +72,11 @@ export class MorfExtractor {
     }
 
     // 6. Extraer Datos Comerciales & Metadatos
-    const businessMeta = BusinessExtractor.extract(html, domain);
-    const resolvedName = structured?.name || businessMeta.businessName || domain;
+    const businessMeta = BusinessExtractor.extract(html);
+    const resolvedName = structured?.name || businessMeta.businessName;
 
     // 7. Extraer Dirección
-    const address = AddressExtractor.extract(html, hints?.city, hints?.country);
+    const address = AddressExtractor.extract(html);
     if (structured?.address) {
       if (structured.address.streetAddress) address.street = structured.address.streetAddress;
       if (structured.address.addressLocality) address.city = structured.address.addressLocality;

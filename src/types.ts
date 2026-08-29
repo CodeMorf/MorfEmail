@@ -196,20 +196,55 @@ export interface ProxyConfig {
   latencyMs?: number;
 }
 
-export interface PolarLicense {
-  licenseKey: string;
-  status: 'active' | 'expired' | 'unregistered' | 'revoked';
-  billingPeriod: 'annual';
-  planName: string;
-  polarCustomerId: string;
-  polarSubscriptionId: string;
-  activationSeatsTotal: number;
-  activationSeatsUsed: number;
-  hardwareId: string;
-  validUntil: string;
-  portalUrl: string;
-  polarDocsUrl: string;
-  polarCheckoutAnnualUrl: string;
-  lastVerifiedAt: string;
+export type PolarBillingStatus =
+  | 'unconfigured'
+  | 'inactive'
+  | 'incomplete'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'revoked'
+  | 'paused'
+  | 'unknown';
+
+export interface PolarBillingState {
+  configured: boolean;
+  webhookConfigured: boolean;
+  environment: 'production' | 'sandbox';
+  status: PolarBillingStatus;
+  planName?: string;
+  productId?: string;
+  polarCustomerId?: string;
+  polarSubscriptionId?: string;
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+  lastEventAt?: string;
+  portalAvailable: boolean;
+}
+
+export type AppNotification = ToastMessage & {
+  createdAt: string;
+};
+
+export interface PolarPrice {
+  id: string;
+  amountType: string;
+  currency: string;
+  amount: number | null;
+}
+
+export interface PolarPlan {
+  key: string;
+  productId: string;
+  name: string;
+  description: string | null;
+  isRecurring: boolean;
+  recurringInterval: string | null;
+  recurringIntervalCount: number | null;
+  prices: PolarPrice[];
+  source?: 'polar' | 'codemorf';
+  purchaseUrl?: string;
 }
 
